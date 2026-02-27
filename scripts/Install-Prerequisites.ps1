@@ -1,0 +1,321 @@
+# --- Install Prerequisites Script ---
+# Installs/Updates Sysmon and Fluent Bit, and sets up the Master Key in Credential Manager
+
+param(
+    [string]$FluentBitVersion = "3.2.3"
+)
+
+# Read Config from YAML (Simple Parse)
+$ConfigPath = Join-Path $PSScriptRoot "..\config.yaml"
+if (-not (Test-Path $ConfigPath)) { throw "Config file not found at $ConfigPath" }
+
+$ConfigContent = Get-Content $ConfigPath -Raw
+$InstallPath = "C:\APPS\Sentinel\.tools" # Default
+if ($ConfigContent -match 'ToolsPath:\s*"(.*)"') { $InstallPath = $matches[1] }
+elseif ($ConfigContent -match "ToolsPath:\s*'(.*)'") { $InstallPath = $matches[1] }
+elseif ($ConfigContent -match 'ToolsPath:\s*([^"\s]+)') { $InstallPath = $matches[1] }
+
+Write-Host "Configuration loaded. Utilities path: $InstallPath"
+
+# Ensure Admin Privileges
+if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
+    Write-Warning "Please run this script as Administrator!"
+    exit
+}
+
+# --- Helper Functions ---
+
+function Get-ExeVersion {
+    param([string]$Path)
+    if (Test-Path $Path) {
+        return (Get-Item $Path).VersionInfo.FileVersion
+    }
+    return $null
+}
+
+function Add-ToPath {
+    param([string]$Dir)
+    $CurrentPath = [Environment]::GetEnvironmentVariable("Path", [System.EnvironmentVariableTarget]::Machine)
+    if ($CurrentPath -split ';' -notcontains $Dir) {
+        Write-Host "Adding $Dir to System PATH..."
+        [Environment]::SetEnvironmentVariable("Path", $CurrentPath + ";$Dir", [System.EnvironmentVariableTarget]::Machine)
+        $env:Path += ";$Dir"
+    } else {
+        Write-Host "Path already contains $Dir. Skipping." -ForegroundColor DarkGray
+    }
+}
+
+function Expand-ZIP {
+    param($ZipPath, $Dest)
+    Expand-Archive -Path $ZipPath -DestinationPath $Dest -Force
+}
+
+function Test-ShouldDownload {
+    param($Url, $LocalPath)
+    
+    # If local file doesn't exist, we must download
+    if (-not (Test-Path $LocalPath)) { return $true }
+    
+    try {
+        # Check remote headers
+        $Response = Invoke-WebRequest -Uri $Url -Method Head -UseBasicParsing -ErrorAction Stop
+        $LastMod = $Response.Headers['Last-Modified']
+        
+        if ([string]::IsNullOrWhiteSpace($LastMod)) { 
+            Write-Warning "Could not determine remote file date. Forcing download."
+            return $true 
+        }
+        
+        $RemoteDate = [DateTime]::Parse($LastMod)
+        $LocalDate = (Get-Item $LocalPath).LastWriteTime
+        
+        # If remote file is newer than our local cached zip, download it.
+        # Otherwise, our local zip is current enough to check for updates.
+        if ($RemoteDate -gt $LocalDate) {
+            Write-Host "Newer version detected on server ($RemoteDate) vs Local ($LocalDate)." -ForegroundColor Cyan
+            return $true
+        }
+        
+        Write-Host "Local cached file is up to date." -ForegroundColor Gray
+        return $false
+    } catch {
+        Write-Warning "Failed to check remote version: $_. Skipping download and using local cache if available."
+        return $false
+    }
+}
+
+# Create Tools Directory
+if (!(Test-Path $InstallPath)) { New-Item -ItemType Directory -Path $InstallPath -Force | Out-Null }
+$TempDir = Join-Path $InstallPath "_temp_install"
+if (!(Test-Path $TempDir)) { New-Item -ItemType Directory -Path $TempDir -Force | Out-Null }
+
+# --- 1. Install/Update Sysmon ---
+Write-Host "`n--- Checking Sysmon ---" -ForegroundColor Cyan
+$SysmonUrl = "https://download.sysinternals.com/files/Sysmon.zip"
+$SysmonInstallDir = Join-Path $InstallPath "Sysmon"
+$SysmonExeInstalled = Join-Path $SysmonInstallDir "Sysmon.exe" 
+$SysmonZipCached = Join-Path $InstallPath "Sysmon.zip" # Keep persistent cache
+$SysmonExtractTemp = Join-Path $TempDir "Sysmon"
+
+try {
+    # 1. Decide if we need to download the ZIP
+    if (Test-ShouldDownload -Url $SysmonUrl -LocalPath $SysmonZipCached) {
+        Write-Host "Downloading Sysmon..."
+        Invoke-WebRequest -Uri $SysmonUrl -OutFile $SysmonZipCached
+    }
+
+    # 2. Extract cached ZIP to temp to check internal EXE version
+    if (Test-Path $SysmonExtractTemp) { Remove-Item $SysmonExtractTemp -Recurse -Force }
+    Expand-ZIP -ZipPath $SysmonZipCached -Dest $SysmonExtractTemp
+
+    # 3. Determine architecture for check
+    $NewSysmonExe = Join-Path $SysmonExtractTemp "Sysmon.exe"
+    if (-not (Test-Path $NewSysmonExe)) { $NewSysmonExe = Join-Path $SysmonExtractTemp "Sysmon64.exe" }
+
+    # 4. Compare Versions
+    $NewVersion = Get-ExeVersion $NewSysmonExe
+    $CurrentVersion = Get-ExeVersion $SysmonExeInstalled
+    $SysmonService = Get-Service "Sysmon" -ErrorAction SilentlyContinue
+
+    $Action = "None"
+    if (-not (Test-Path $SysmonExeInstalled)) {
+        $Action = "Install"
+        Write-Host "Sysmon not found. Installing version $NewVersion..."
+    } elseif ($null -eq $SysmonService) {
+        $Action = "Register"
+        Write-Host "Sysmon files present but service missing. Registering..."
+    } elseif ([version]$CurrentVersion -ne [version]$NewVersion) {
+        $Action = "Update"
+        Write-Host "Sysmon update found ($CurrentVersion -> $NewVersion). Updating..."
+    } else {
+        Write-Host "Sysmon is already up to date ($CurrentVersion)." -ForegroundColor Green
+    }
+
+    # 5. Apply Install/Update if needed
+    if ($Action -ne "None") {
+        # Stop Service if running
+        if ($SysmonService -and $SysmonService.Status -eq 'Running') {
+            Write-Host "Stopping Sysmon service..."
+            Stop-Service "Sysmon" -Force -ErrorAction SilentlyContinue
+        }
+        
+        # Cleanup if service exists but we are doing a fresh Install (files missing) or explicit Register
+        if ($SysmonService -and ($Action -in "Install", "Register")) {
+             Write-Host "Sysmon service detected. Attempting to uninstall previous instance..."
+             # Try using the new binary (if copied) or just rely on 'sysmon' in path if available
+             # We will use the extracted temp binary if available, or the one we are about to copy/have copied
+             
+             # If we haven't copied yet (for Install), use temp
+             $TempSysmon = Join-Path $SysmonExtractTemp "Sysmon.exe"
+             if (-not (Test-Path $TempSysmon)) { $TempSysmon = Join-Path $SysmonExtractTemp "Sysmon64.exe" }
+             
+             if (Test-Path $TempSysmon) {
+                 Start-Process -FilePath $TempSysmon -ArgumentList "-u -force" -Wait -NoNewWindow -ErrorAction SilentlyContinue
+             } else {
+                 # Fallback
+                 Start-Process -FilePath "sysmon" -ArgumentList "-u -force" -Wait -NoNewWindow -ErrorAction SilentlyContinue
+             }
+             Start-Sleep -Seconds 3
+        }
+        
+        # Move files
+        if ($Action -in "Install", "Update") {
+            if (!(Test-Path $SysmonInstallDir)) { New-Item -ItemType Directory -Path $SysmonInstallDir -Force | Out-Null }
+            Copy-Item -Path "$SysmonExtractTemp\*" -Destination $SysmonInstallDir -Recurse -Force
+        }
+
+        # Add to PATH
+        Add-ToPath $SysmonInstallDir
+        
+        # Install/Register Service
+        $ConfigPath = Join-Path $PSScriptRoot "..\sysmon\sysmon-config.xml"
+        $SysmonBinary = Join-Path $SysmonInstallDir "Sysmon.exe"
+        if (-not (Test-Path $SysmonBinary)) { $SysmonBinary = Join-Path $SysmonInstallDir "Sysmon64.exe" }
+
+        if ($Action -eq "Update") {
+             Start-Service "Sysmon"
+             if (Test-Path $ConfigPath) {
+                 Write-Host "Updating Sysmon config..."
+                 Start-Process -FilePath $SysmonBinary -ArgumentList "-c `"$ConfigPath`"" -Wait -NoNewWindow
+             }
+        } else {
+             if ($Action -eq "Register") {
+                # Already cleaned up above
+             }
+
+             Write-Host "Installing Sysmon Service..."
+             $ArgsList = "-i -accepteula"
+             if (Test-Path $ConfigPath) { $ArgsList = "-i `"$ConfigPath`" -accepteula" }
+             $Process = Start-Process -FilePath $SysmonBinary -ArgumentList $ArgsList -Wait -NoNewWindow -PassThru
+             
+             if ($Process.ExitCode -ne 0) {
+                 Write-Warning "Sysmon installer exited with code $($Process.ExitCode)."
+             }
+        }
+        
+        # Verify Installation
+        Start-Sleep -Seconds 2
+        if (-not (Get-WinEvent -ListLog "Microsoft-Windows-Sysmon/Operational" -ErrorAction SilentlyContinue)) {
+            Write-Error "Sysmon installation failed to register the Event Log channel."
+            Write-Error "Please try running 'C:\Tools\Sysmon\Sysmon.exe -u force' manually, rebooting, and running this script again."
+        } else {
+            Write-Host "Sysmon $Action complete."
+        }
+    } else {
+        # Ensure service is running if no install/update needed
+        $Svc = Get-Service "Sysmon" -ErrorAction SilentlyContinue
+        if ($Svc -and $Svc.Status -ne 'Running') {
+            Start-Service "Sysmon"
+            Write-Host "Sysmon service started."
+        }
+    }
+
+} catch {
+    Write-Error "Failed to process Sysmon: $_"
+}
+
+# --- 2. Install/Update Fluent Bit ---
+Write-Host "`n--- Checking Fluent Bit ---" -ForegroundColor Cyan
+$FluentBitUrl = "https://packages.fluentbit.io/windows/fluent-bit-$FluentBitVersion-win64.zip" 
+$FluentBitDir = Join-Path $InstallPath "fluent-bit"
+$FluentBitBin = Join-Path $FluentBitDir "bin\fluent-bit.exe"
+
+$CurrentFBVersion = $null
+if (Test-Path $FluentBitBin) {
+    $CurrentFBVersion = (Get-Item $FluentBitBin).VersionInfo.ProductVersion
+    if ([string]::IsNullOrWhiteSpace($CurrentFBVersion)) { $CurrentFBVersion = (Get-Item $FluentBitBin).VersionInfo.FileVersion }
+}
+
+$FBAction = "None"
+if (-not (Test-Path $FluentBitBin)) {
+    $FBAction = "Install"
+    Write-Host "Fluent Bit not found. Installing version $FluentBitVersion..."
+} else {
+    # Ensure both are parsed as [version] objects for accurate comparison (e.g. 3.2.3.0 == 3.2.3)
+    # Using try/catch in case parsing fails (e.g. if version string has non-numeric chars)
+    try {
+        $vCurrent = [version]$CurrentFBVersion
+        $vTarget = [version]$FluentBitVersion
+        
+        # Normalize versions to 4 components (Major.Minor.Build.Revision)
+        # because [version]"3.2.3" (Revision -1) is not equal to [version]"3.2.3.0" (Revision 0)
+        if ($vCurrent.Revision -lt 0) { 
+            $vCurrent = [version]::new($vCurrent.Major, $vCurrent.Minor, [Math]::Max(0, $vCurrent.Build), 0) 
+        }
+        if ($vTarget.Revision -lt 0) { 
+            $vTarget = [version]::new($vTarget.Major, $vTarget.Minor, [Math]::Max(0, $vTarget.Build), 0) 
+        }
+
+        if ($vCurrent -ne $vTarget) {
+            $FBAction = "Update"
+            Write-Host "Fluent Bit version mismatch ($vCurrent -> $vTarget). Updating..."
+        } else {
+            Write-Host "Fluent Bit is already at target version ($vCurrent)." -ForegroundColor Green
+        }
+    } catch {
+        Write-Warning "Version parsing failed. Fallback to string comparison."
+        if ($CurrentFBVersion -ne $FluentBitVersion) {
+            $FBAction = "Update"
+            Write-Host "Fluent Bit version mismatch ($CurrentFBVersion -> $FluentBitVersion). Updating..."
+        }
+    }
+}
+
+if ($FBAction -ne "None") {
+    $FluentBitZip = Join-Path $TempDir "fluent-bit.zip"
+
+    try {
+        # Download
+        Write-Host "Downloading Fluent Bit $FluentBitVersion..."
+        Invoke-WebRequest -Uri $FluentBitUrl -OutFile $FluentBitZip
+
+        # Extract
+        Expand-ZIP -ZipPath $FluentBitZip -Dest $TempDir
+
+        $ExtractedRoot = Get-ChildItem -Path $TempDir -Filter "fluent-bit*-win64" | Select-Object -First 1
+        if ($ExtractedRoot) {
+            if (!(Test-Path $FluentBitDir)) { New-Item -ItemType Directory -Path $FluentBitDir -Force | Out-Null }
+            Copy-Item -Path "$($ExtractedRoot.FullName)\*" -Destination $FluentBitDir -Recurse -Force
+        } else {
+            throw "Could not locate extracted Fluent Bit folder structure."
+        }
+
+        # Add to PATH
+        Add-ToPath (Join-Path $FluentBitDir "bin")
+
+        Write-Host "Fluent Bit $FBAction complete."
+
+    } catch {
+        Write-Error "Failed to install/update Fluent Bit: $_"
+    }
+}
+
+# --- 3. Install/Update NSSM (via winget) ---
+Write-Host "`n--- Checking NSSM ---" -ForegroundColor Cyan
+
+if (-not (Get-Command nssm -ErrorAction SilentlyContinue)) {
+    Write-Host "NSSM not found. Installing via winget..."
+    try {
+        winget install NSSM.NSSM --silent --accept-package-agreements --accept-source-agreements
+
+        # Refresh PATH in current session
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+                    [System.Environment]::GetEnvironmentVariable("Path", "User")
+
+        if (Get-Command nssm -ErrorAction SilentlyContinue) {
+            Write-Host "NSSM installed successfully." -ForegroundColor Green
+        } else {
+            Write-Error "NSSM was not found in PATH after winget install."
+        }
+    } catch {
+        Write-Error "Failed to install NSSM: $_"
+    }
+} else {
+    Write-Host "NSSM is already installed." -ForegroundColor Green
+}
+
+# Cleanup Temp
+if (Test-Path $TempDir) { Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue }
+
+Write-Host "`nPrerequisites check/installation complete." -ForegroundColor Green
+

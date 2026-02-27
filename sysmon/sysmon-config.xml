@@ -1,0 +1,32 @@
+<Sysmon schemaversion="4.82">
+  <HashAlgorithms>*</HashAlgorithms>
+  <EventFiltering>
+    <!-- Event ID 1: Process Creation -->
+    <ProcessCreate onmatch="exclude">
+       <!-- Exclude noisy system processes -->
+       <Image condition="end with">svchost.exe</Image>
+       <Image condition="end with">taskhostw.exe</Image>
+    </ProcessCreate>
+
+    <!-- Event ID 3: Network Connection -->
+    <NetworkConnect onmatch="include">
+       <!-- Log connections from known remote access tools -->
+       <Image condition="contains">rustdesk</Image>
+       <Image condition="contains">anydesk</Image>
+       <Image condition="contains">teamviewer</Image>
+       <Image condition="contains">logmein</Image>
+       <Image condition="contains">powershell.exe</Image>
+       <Image condition="contains">cmd.exe</Image>
+    </NetworkConnect>
+
+    <!-- Event ID 11: File Create -->
+    <FileCreate onmatch="include">
+        <!-- Detect ransomware-like extensions -->
+        <TargetFilename condition="end with">.encrypted</TargetFilename>
+        <TargetFilename condition="end with">.lock</TargetFilename>
+        <TargetFilename condition="end with">.crypt</TargetFilename>
+        <!-- Honeyfile detection -->
+        <TargetFilename condition="contains">Passwords_Admin.txt</TargetFilename>
+    </FileCreate>
+  </EventFiltering>
+</Sysmon>
