@@ -61,6 +61,12 @@
 [FILTER]
     Name    lua
     Match   *
+    script  {{AGENT_PATH}}\llm_filter.lua
+    call    drop_noise
+
+[FILTER]
+    Name    lua
+    Match   *
     script  {{AGENT_PATH}}\sysmon_security.lua
     call    cb_filter
 
