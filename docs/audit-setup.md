@@ -171,3 +171,114 @@ After the script completes, deploy or restart the Sentinel agent:
 # or
 nssm restart SentinelAgent              # already installed
 ```
+
+---
+
+## Full installation — agent + Lua filter watcher (recommended)
+
+This mode runs both services under dedicated **Virtual Service Accounts** with
+least-privilege permissions. Neither service requires LocalSystem or a human
+admin account at runtime.
+
+### Service account model
+
+| Service | Account | Permissions |
+|---|---|---|
+| `SentinelAgent` | `NT SERVICE\SentinelAgent` | Full Control on `$AgentPath`, member of **Event Log Readers** |
+| `SentinelLuaWatcher` | `NT SERVICE\SentinelLuaWatcher` | Modify on `$AgentPath`, Start+Stop+QueryStatus on `SentinelAgent` only (SDDL) |
+
+### Step-by-step (all commands as Administrator)
+
+**1. Prerequisites — Sysmon, Fluent Bit, NSSM**
+
+```powershell
+.\scripts\Install-Prerequisites.ps1
+```
+
+**2. Audit policy — one-time endpoint hardening**
+
+```powershell
+.\scripts\maintenance\Initialize-WindowsAudit.ps1
+```
+
+**3. Install SentinelAgent service**
+
+Creates the `NT SERVICE\SentinelAgent` virtual account, grants it file and
+event-log permissions, and starts Fluent Bit.
+
+```powershell
+.\scripts\Install-SentinelService.ps1
+```
+
+**4. Install SentinelLuaWatcher service**
+
+Creates the `NT SERVICE\SentinelLuaWatcher` virtual account, grants it Modify
+on the agent directory, and delegates Start/Stop rights over `SentinelAgent`
+via SDDL — without giving it any other elevated privileges.
+
+```powershell
+.\scripts\Install-LuaWatcherService.ps1
+```
+
+> **Order matters.** The watcher installer reads `SentinelAgent`'s current
+> SDDL to extend it. Run step 3 before step 4.
+
+**5. Verify**
+
+```powershell
+Get-Service SentinelAgent, SentinelLuaWatcher | Format-Table Name, Status, StartType
+```
+
+Both services should show `Running` / `Automatic`.
+
+Watcher log (poll results, download events, restarts):
+
+```powershell
+Get-Content "C:\APPS\Sentinel\logs\lua-watcher.log" -Tail 30 -Wait
+```
+
+### How the watcher works
+
+```
+every LuaWatcherInterval seconds (default: 300 s)
+  │
+  ├─ GET noise_filter.meta  ──► parse { ts, archive_key }
+  │
+  ├─ compare ts  vs  C:\APPS\Sentinel\lua_filter.state
+  │
+  ├─ [no change] → log "up-to-date", sleep
+  │
+  └─ [new ts] → download noise_filter.lua
+               → overwrite C:\APPS\Sentinel\llm_filter.lua
+               → save new ts to lua_filter.state
+               → Restart-Service SentinelAgent
+```
+
+### Runtime management
+
+```powershell
+# Stop everything
+nssm stop SentinelLuaWatcher ; nssm stop SentinelAgent
+
+# Start everything
+nssm start SentinelAgent ; nssm start SentinelLuaWatcher
+
+# Remove everything
+nssm stop SentinelLuaWatcher  ; nssm remove SentinelLuaWatcher confirm
+nssm stop SentinelAgent       ; nssm remove SentinelAgent confirm
+
+# Change poll interval — edit config.yaml, then restart watcher
+nssm restart SentinelLuaWatcher
+```
+
+### Tune the poll interval
+
+Edit `config.yaml` and restart the watcher:
+
+```yaml
+LuaWatcherInterval: 120   # poll every 2 minutes
+```
+
+```powershell
+nssm restart SentinelLuaWatcher
+```
