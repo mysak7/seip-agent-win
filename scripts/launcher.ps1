@@ -28,7 +28,7 @@ $RepoLuaPath        = Join-Path $PSScriptRoot "..\fluent-bit\sysmon_security.lua
 $LocalPackLuaPath   = Join-Path $AgentPath "sysmon_pack.lua"
 $RepoPackLuaPath    = Join-Path $PSScriptRoot "..\fluent-bit\sysmon_pack.lua"
 $LocalLlmLuaPath    = Join-Path $AgentPath "llm_filter.lua"
-$RepoLlmLuaPath     = Join-Path $PSScriptRoot "..\fluent-bit\llm_filter.lua"
+$LlmLuaUrl          = "https://mysak7-seip-lua.s3.eu-central-1.amazonaws.com/noise_filter.lua"
 $FluentBitExe       = Join-Path $ToolsPath "fluent-bit\bin\fluent-bit.exe"
 
 # --- Pre-flight Checks ---
@@ -108,10 +108,10 @@ if (Test-Path $RepoPackLuaPath) {
 } else {
     Write-Warning "Lua pack script not found at $RepoPackLuaPath - payload compaction will be disabled."
 }
-if (Test-Path $RepoLlmLuaPath) {
-    Copy-Item -Path $RepoLlmLuaPath -Destination $LocalLlmLuaPath -Force
-} else {
-    Write-Warning "Lua noise filter not found at $RepoLlmLuaPath - LLM noise filtering will be disabled."
+try {
+    Invoke-WebRequest -Uri $LlmLuaUrl -OutFile $LocalLlmLuaPath -UseBasicParsing
+} catch {
+    Write-Warning "Failed to download LLM noise filter from $LlmLuaUrl - LLM noise filtering will be disabled."
 }
 
 # 6. Saving final config (only for this run)
