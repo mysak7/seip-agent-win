@@ -65,7 +65,7 @@ while ($true) {
                 Restart-Service -Name $ServiceName -Force
                 Write-Log "$ServiceName restarted successfully."
             } else {
-                Write-Log "$ServiceName not found — skipping restart." "WARN"
+                Write-Log "$ServiceName not found - skipping restart." "WARN"
             }
         } else {
             Write-Log "Lua filter up-to-date (ts=$remoteTsRaw)."
