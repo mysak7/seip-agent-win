@@ -11,7 +11,7 @@
 ## Running the test
 
 ```powershell
-.\scripts\Test-FluentBit.ps1
+.\scripts\maintenance\Test-FluentBit.ps1
 ```
 
 This script:

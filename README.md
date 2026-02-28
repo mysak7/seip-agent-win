@@ -94,6 +94,14 @@ For the full security model and runtime management commands see
         *   Enables the WMI-Activity/Operational log (EIDs 5859–5861).
     *   See [docs/audit-setup.md](docs/audit-setup.md) for the full EID mapping.
 
+*   **`scripts/maintenance/Test-FluentBit.ps1`**
+    *   **Purpose:** Diagnostic — runs Fluent Bit in debug mode (stdout instead of Kafka) to verify the Lua filter.
+    *   See [docs/testing.md](docs/testing.md) for usage and expected output.
+
+*   **`scripts/maintenance/Uninstall-SentinelService.ps1`**
+    *   **Purpose:** Removes the `SentinelAgent` Windows Service.
+    *   **Requires Administrator privileges.**
+
 *   **`copy_to_rbac.bat`**
     *   **Purpose:** Backs up or deploys the current local project to a remote network location.
     *   **What it does:**
