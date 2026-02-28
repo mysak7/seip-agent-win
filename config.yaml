@@ -1,2 +1,3 @@
 AgentPath: "C:\APPS\Sentinel"
 ToolsPath: "C:\APPS\Sentinel\.tools"
+LuaWatcherInterval: 300   # seconds between noise_filter.meta polls (default: 5 min)
