@@ -1,4 +1,3 @@
-#Requires -RunAsAdministrator
 # --- Sentinel Lua Filter Watcher ---
 # Polls noise_filter.meta from S3, downloads new Lua if ts changed, restarts SentinelAgent.
 
