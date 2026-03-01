@@ -1,22 +1,20 @@
 # --- Sentinel Lua Filter Watcher ---
 # Polls noise_filter.meta from S3, downloads new Lua if ts changed, restarts SentinelAgent.
+# Runs every 5 minutes, clock-aligned to :07/:12/:17/:22/... (minute % 5 == 2).
 
-$MetaUrl    = "https://mysak7-seip-lua.s3.eu-central-1.amazonaws.com/noise_filter.meta"
-$LuaUrl     = "https://mysak7-seip-lua.s3.eu-central-1.amazonaws.com/noise_filter.lua"
+$MetaUrl     = "https://mysak7-seip-lua.s3.eu-central-1.amazonaws.com/noise_filter.meta"
+$LuaUrl      = "https://mysak7-seip-lua.s3.eu-central-1.amazonaws.com/noise_filter.lua"
 $ServiceName = "SentinelAgent"
 
 # --- Read config ---
 $ConfigPath = Join-Path $PSScriptRoot "..\config.yaml"
 $AgentPath  = "C:\APPS\Sentinel"
-$PollSec    = 300  # default 5 minutes
 
 if (Test-Path $ConfigPath) {
     $cfg = Get-Content $ConfigPath -Raw
     if ($cfg -match 'AgentPath:\s*"(.*)"')        { $AgentPath = $matches[1] }
     elseif ($cfg -match "AgentPath:\s*'(.*)'")    { $AgentPath = $matches[1] }
     elseif ($cfg -match 'AgentPath:\s*([^"\s]+)') { $AgentPath = $matches[1] }
-
-    if ($cfg -match 'LuaWatcherInterval:\s*(\d+)') { $PollSec = [int]$matches[1] }
 }
 
 $LocalLuaPath  = Join-Path $AgentPath "llm_filter.lua"
@@ -33,9 +31,24 @@ function Write-Log {
     Add-Content -Path (Join-Path $LogDir "lua-watcher.log") -Value $line
 }
 
-Write-Log "Lua filter watcher started. Poll interval: ${PollSec}s"
+# Returns seconds to sleep until the next clock minute where (minute % 5 == 2).
+# Produces the schedule: :02, :07, :12, :17, :22, :27, :32, :37, :42, :47, :52, :57
+function Get-SecondsUntilNextRun {
+    $now       = Get-Date
+    $minMod    = $now.Minute % 5
+    $minToNext = (2 - $minMod + 5) % 5
+    if ($minToNext -eq 0 -and $now.Second -gt 0) { $minToNext = 5 }
+    return $minToNext * 60 - $now.Second
+}
+
+Write-Log "Lua filter watcher started. Schedule: every 5 min, aligned to :07/:12/:17/..."
 
 while ($true) {
+    $waitSec  = Get-SecondsUntilNextRun
+    $nextTime = (Get-Date).AddSeconds($waitSec).ToString("HH:mm")
+    Write-Log "Next check at $nextTime (in ${waitSec}s)."
+    Start-Sleep -Seconds $waitSec
+
     try {
         # 1. Fetch meta
         $metaJson = Invoke-WebRequest -Uri $MetaUrl -UseBasicParsing -TimeoutSec 15 |
@@ -73,6 +86,4 @@ while ($true) {
     } catch {
         Write-Log "Error during check: $_" "ERROR"
     }
-
-    Start-Sleep -Seconds $PollSec
 }
