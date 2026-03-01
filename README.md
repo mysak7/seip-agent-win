@@ -33,7 +33,7 @@ For the full security model and runtime management commands see
     *   Defines installation paths and watcher tuning:
         *   `AgentPath`: Root directory for agent configuration and logs (default: `C:\APPS\Sentinel`).
         *   `ToolsPath`: Directory for utility binaries (default: `C:\APPS\Sentinel\.tools`).
-        *   `LuaWatcherInterval`: Seconds between S3 metadata polls (default: `300`).
+        *   `LuaWatcherSchedule`: Documents the fixed poll schedule (every 5 min, clock-aligned to `:07/:12/:17/...`).
 
 ### Installation & Setup
 
@@ -56,7 +56,7 @@ For the full security model and runtime management commands see
 *   **`scripts/Watch-LuaFilter.ps1`**
     *   **Purpose:** Background watcher that hot-reloads the LLM noise filter when a new version is published to S3.
     *   **What it does:**
-        *   Polls `noise_filter.meta` on S3 every `LuaWatcherInterval` seconds.
+        *   Polls `noise_filter.meta` on S3 every 5 minutes, clock-aligned to `:07/:12/:17/...`.
         *   Compares the `ts` field against `$AgentPath\lua_filter.state`.
         *   On change: downloads `noise_filter.lua`, saves the new `ts`, restarts `SentinelAgent`.
         *   Runs continuously as a service; managed by `Install-LuaWatcherService.ps1`.
