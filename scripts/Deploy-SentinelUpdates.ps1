@@ -92,25 +92,21 @@ if ($needRestart) {
 Write-Host "`n[2/3] Re-applying audit policies (auditpol)..." -ForegroundColor Yellow
 
 $auditPolicies = @(
-    @{ sub = "Logon";                     sf = "success,failure" }
-    @{ sub = "Special Logon";             sf = "success"         }
-    @{ sub = "Sensitive Privilege Use";   sf = "success,failure" }
-    @{ sub = "Process Creation";          sf = "success"         }
-    @{ sub = "Process Termination";       sf = "success"         }
-    @{ sub = "Registry";                  sf = "success,failure" }
-    @{ sub = "Other Object Access Events";sf = "success,failure" }
-    @{ sub = "Security System Extension"; sf = "success,failure" }
-    @{ sub = "Security State Change";     sf = "success,failure" }
-    @{ sub = "Audit Policy Change";       sf = "success,failure" }
+    @{ sub = "Logon";                      guid = "{0CCE9215-69AE-11D9-BED3-505054503030}"; sf = "success,failure" }
+    @{ sub = "Special Logon";              guid = "{0CCE921B-69AE-11D9-BED3-505054503030}"; sf = "success"         }
+    @{ sub = "Sensitive Privilege Use";    guid = "{0CCE9228-69AE-11D9-BED3-505054503030}"; sf = "success,failure" }
+    @{ sub = "Process Creation";           guid = "{0CCE922B-69AE-11D9-BED3-505054503030}"; sf = "success"         }
+    @{ sub = "Process Termination";        guid = "{0CCE922C-69AE-11D9-BED3-505054503030}"; sf = "success"         }
+    @{ sub = "Registry";                   guid = "{0CCE921E-69AE-11D9-BED3-505054503030}"; sf = "success,failure" }
+    @{ sub = "Other Object Access Events"; guid = "{0CCE9227-69AE-11D9-BED3-505054503030}"; sf = "success,failure" }
+    @{ sub = "Security System Extension";  guid = "{0CCE9211-69AE-11D9-BED3-505054503030}"; sf = "success,failure" }
+    @{ sub = "Security State Change";      guid = "{0CCE9210-69AE-11D9-BED3-505054503030}"; sf = "success,failure" }
+    @{ sub = "Audit Policy Change";        guid = "{0CCE922F-69AE-11D9-BED3-505054503030}"; sf = "success,failure" }
 )
 
 foreach ($p in $auditPolicies) {
-    if ($p.sf -eq "success,failure") {
-        $sfArgs = "/success:enable /failure:enable"
-    } else {
-        $sfArgs = "/success:enable /failure:disable"
-    }
-    $out = & auditpol /set /subcategory:"$($p.sub)" $sfArgs.Split(" ") 2>&1
+    $failureState = if ($p.sf -eq "success,failure") { "enable" } else { "disable" }
+    $out = & auditpol /set /subcategory:$($p.guid) /success:enable /failure:$failureState 2>&1
     if ($LASTEXITCODE -eq 0) {
         Write-Host "  OK $($p.sub) [$($p.sf)]" -ForegroundColor Green
     } else {

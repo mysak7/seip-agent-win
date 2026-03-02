@@ -63,30 +63,26 @@ Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" `
 # Emits the EIDs listed in the comment → matched by sysmon_security.lua
 $auditPolicies = @(
     # ── Logon / Authentication ────────────────────────────────────────────────
-    @{ sub = "Logon";              sf = "success,failure" },  # 4624, 4625, 4634
-    @{ sub = "Special Logon";     sf = "success"          },  # 4672 — admin-eq priv on logon
+    @{ sub = "Logon";                      guid = "{0CCE9215-69AE-11D9-BED3-505054503030}"; sf = "success,failure" },  # 4624, 4625, 4634
+    @{ sub = "Special Logon";              guid = "{0CCE921B-69AE-11D9-BED3-505054503030}"; sf = "success"         },  # 4672 — admin-eq priv on logon
     # ── Credential Use ────────────────────────────────────────────────────────
-    @{ sub = "Sensitive Privilege Use"; sf = "success,failure" },  # 4673, 4674
+    @{ sub = "Sensitive Privilege Use";    guid = "{0CCE9228-69AE-11D9-BED3-505054503030}"; sf = "success,failure" },  # 4673, 4674
     # ── Process Tracking ──────────────────────────────────────────────────────
-    @{ sub = "Process Creation";    sf = "success"          },  # 4688 (with cmdline)
-    @{ sub = "Process Termination"; sf = "success"          },  # 4689 (enables Create→Delete→StillRunning correlation for Process Ghosting)
+    @{ sub = "Process Creation";           guid = "{0CCE922B-69AE-11D9-BED3-505054503030}"; sf = "success"         },  # 4688 (with cmdline)
+    @{ sub = "Process Termination";        guid = "{0CCE922C-69AE-11D9-BED3-505054503030}"; sf = "success"         },  # 4689 (enables Create→Delete→StillRunning correlation for Process Ghosting)
     # ── Object Access ─────────────────────────────────────────────────────────
-    @{ sub = "Registry";          sf = "success,failure"  },  # 4657 (requires SACL, see step 4)
+    @{ sub = "Registry";                   guid = "{0CCE921E-69AE-11D9-BED3-505054503030}"; sf = "success,failure" },  # 4657 (requires SACL, see step 4)
     # ── Persistence ───────────────────────────────────────────────────────────
-    @{ sub = "Other Object Access Events"; sf = "success,failure" },  # 4698-4702 (tasks)
-    @{ sub = "Security System Extension";  sf = "success,failure" },  # 4697 (services)
+    @{ sub = "Other Object Access Events"; guid = "{0CCE9227-69AE-11D9-BED3-505054503030}"; sf = "success,failure" },  # 4698-4702 (tasks)
+    @{ sub = "Security System Extension";  guid = "{0CCE9211-69AE-11D9-BED3-505054503030}"; sf = "success,failure" },  # 4697 (services)
     # ── Anti-Forensics / Tampering ────────────────────────────────────────────
-    @{ sub = "Security State Change"; sf = "success,failure" },  # 1102 (log cleared)
-    @{ sub = "Audit Policy Change";   sf = "success,failure" }   # 4719 (policy tampered)
+    @{ sub = "Security State Change";      guid = "{0CCE9210-69AE-11D9-BED3-505054503030}"; sf = "success,failure" },  # 1102 (log cleared)
+    @{ sub = "Audit Policy Change";        guid = "{0CCE922F-69AE-11D9-BED3-505054503030}"; sf = "success,failure" }   # 4719 (policy tampered)
 )
 
 foreach ($policy in $auditPolicies) {
-    if ($policy.sf -eq "success,failure") {
-        $sfArgs = "/success:enable /failure:enable"
-    } else {
-        $sfArgs = "/success:enable /failure:disable"
-    }
-    & auditpol /set /subcategory:"$($policy.sub)" $sfArgs.Split(" ") | Out-Null
+    $failureState = if ($policy.sf -eq "success,failure") { "enable" } else { "disable" }
+    & auditpol /set /subcategory:$($policy.guid) /success:enable /failure:$failureState | Out-Null
     Write-Host "  OK $($policy.sub) [$($policy.sf)]" -ForegroundColor Green
 }
 
