@@ -81,6 +81,13 @@ local LOLBAS = {
     "psexec.exe", "psexec64.exe",
     "whoami.exe", "nltest.exe",
     "mimikatz.exe", "procdump.exe",
+    -- 2025/2026: native Win11 binaries now preferred by attackers to evade PS scrutiny
+    "curl.exe",      -- download payloads: curl.exe -o payload.exe http://...
+    "tar.exe",       -- unpack staged archives: tar -xf loot.zip
+    "forfiles.exe",  -- execute per-file commands; used for LOLBin chains
+    "expand.exe",    -- decompress cabinet files; staging technique
+    "bash.exe",      -- WSL1/WSL2 shell escape from Win32 monitoring
+    "wsl.exe",       -- WSL entry point; can exec Linux ELFs and bypass AMSI
 }
 
 local SUSPICIOUS_PARENTS = {
