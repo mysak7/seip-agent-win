@@ -138,6 +138,8 @@ Set-RegistryAudit "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows" `
     "AppInit_DLLs  (DLL injection via registry)"
 Set-RegistryAudit "HKLM:\SYSTEM\CurrentControlSet\Control\LSA" `
     "LSA secrets  (credential store tampering)"
+Set-RegistryAudit "HKLM:\SYSTEM\CurrentControlSet\Services" `
+    "Services (DACL tampering / hidden persistence via Security-descriptor deletion)"
 
 # ─────────────────────────────────────────────
 # 5. WMI LOGGING
