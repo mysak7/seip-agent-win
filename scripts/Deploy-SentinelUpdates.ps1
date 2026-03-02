@@ -106,12 +106,16 @@ $auditPolicies = @(
 
 foreach ($p in $auditPolicies) {
     if ($p.sf -eq "success,failure") {
-        $args = @("/success:enable", "/failure:enable")
+        $sfArgs = "/success:enable /failure:enable"
     } else {
-        $args = @("/success:enable", "/failure:disable")
+        $sfArgs = "/success:enable /failure:disable"
     }
-    & auditpol /set /subcategory:"$($p.sub)" @args | Out-Null
-    Write-Host "  OK $($p.sub) [$($p.sf)]" -ForegroundColor Green
+    $out = & auditpol /set /subcategory:"$($p.sub)" $sfArgs.Split(" ") 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  OK $($p.sub) [$($p.sf)]" -ForegroundColor Green
+    } else {
+        Write-Host "  FAIL $($p.sub) — $out" -ForegroundColor Red
+    }
 }
 
 # Include command line in EID 4688
