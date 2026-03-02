@@ -91,127 +91,165 @@ if (!(Test-Path $TempDir)) { New-Item -ItemType Directory -Path $TempDir -Force 
 
 # --- 1. Install/Update Sysmon ---
 Write-Host "`n--- Checking Sysmon ---" -ForegroundColor Cyan
-$SysmonUrl = "https://download.sysinternals.com/files/Sysmon.zip"
-$SysmonInstallDir = Join-Path $InstallPath "Sysmon"
-$SysmonExeInstalled = Join-Path $SysmonInstallDir "Sysmon.exe" 
-$SysmonZipCached = Join-Path $InstallPath "Sysmon.zip" # Keep persistent cache
-$SysmonExtractTemp = Join-Path $TempDir "Sysmon"
+$SysmonConfig = Join-Path $PSScriptRoot "..\sysmon\sysmon-config.xml"
 
-try {
-    # 1. Decide if we need to download the ZIP
-    if (Test-ShouldDownload -Url $SysmonUrl -LocalPath $SysmonZipCached) {
-        Write-Host "Downloading Sysmon..."
-        Invoke-WebRequest -Uri $SysmonUrl -OutFile $SysmonZipCached
-    }
+# ── Native Sysmon path (Windows 11 24H2+ / Server 2025+, build ≥ 26100) ──────
+$OsBuild = [System.Environment]::OSVersion.Version.Build
+$UseNative = $false
 
-    # 2. Extract cached ZIP to temp to check internal EXE version
-    if (Test-Path $SysmonExtractTemp) { Remove-Item $SysmonExtractTemp -Recurse -Force }
-    Expand-ZIP -ZipPath $SysmonZipCached -Dest $SysmonExtractTemp
+if ($OsBuild -ge 26100) {
+    $NativeFeature = Get-WindowsOptionalFeature -Online -FeatureName "Sysmon" -ErrorAction SilentlyContinue
+    if ($NativeFeature) {
+        $UseNative = $true
+        Write-Host "  Native Sysmon optional feature detected (build $OsBuild)." -ForegroundColor Cyan
 
-    # 3. Determine architecture for check
-    $NewSysmonExe = Join-Path $SysmonExtractTemp "Sysmon.exe"
-    if (-not (Test-Path $NewSysmonExe)) { $NewSysmonExe = Join-Path $SysmonExtractTemp "Sysmon64.exe" }
-
-    # 4. Compare Versions
-    $NewVersion = Get-ExeVersion $NewSysmonExe
-    $CurrentVersion = Get-ExeVersion $SysmonExeInstalled
-    $SysmonService = Get-Service "Sysmon" -ErrorAction SilentlyContinue
-
-    $Action = "None"
-    if (-not (Test-Path $SysmonExeInstalled)) {
-        $Action = "Install"
-        Write-Host "Sysmon not found. Installing version $NewVersion..."
-    } elseif ($null -eq $SysmonService) {
-        $Action = "Register"
-        Write-Host "Sysmon files present but service missing. Registering..."
-    } elseif ([version]$CurrentVersion -ne [version]$NewVersion) {
-        $Action = "Update"
-        Write-Host "Sysmon update found ($CurrentVersion -> $NewVersion). Updating..."
-    } else {
-        Write-Host "Sysmon is already up to date ($CurrentVersion)." -ForegroundColor Green
-    }
-
-    # 5. Apply Install/Update if needed
-    if ($Action -ne "None") {
-        # Stop Service if running
-        if ($SysmonService -and $SysmonService.Status -eq 'Running') {
-            Write-Host "Stopping Sysmon service..."
-            Stop-Service "Sysmon" -Force -ErrorAction SilentlyContinue
-        }
-        
-        # Cleanup if service exists but we are doing a fresh Install (files missing) or explicit Register
-        if ($SysmonService -and ($Action -in "Install", "Register")) {
-             Write-Host "Sysmon service detected. Attempting to uninstall previous instance..."
-             # Try using the new binary (if copied) or just rely on 'sysmon' in path if available
-             # We will use the extracted temp binary if available, or the one we are about to copy/have copied
-             
-             # If we haven't copied yet (for Install), use temp
-             $TempSysmon = Join-Path $SysmonExtractTemp "Sysmon.exe"
-             if (-not (Test-Path $TempSysmon)) { $TempSysmon = Join-Path $SysmonExtractTemp "Sysmon64.exe" }
-             
-             if (Test-Path $TempSysmon) {
-                 Start-Process -FilePath $TempSysmon -ArgumentList "-u -force" -Wait -NoNewWindow -ErrorAction SilentlyContinue
-             } else {
-                 # Fallback
-                 Start-Process -FilePath "sysmon" -ArgumentList "-u -force" -Wait -NoNewWindow -ErrorAction SilentlyContinue
-             }
-             Start-Sleep -Seconds 3
-        }
-        
-        # Move files
-        if ($Action -in "Install", "Update") {
-            if (!(Test-Path $SysmonInstallDir)) { New-Item -ItemType Directory -Path $SysmonInstallDir -Force | Out-Null }
-            Copy-Item -Path "$SysmonExtractTemp\*" -Destination $SysmonInstallDir -Recurse -Force
-        }
-
-        # Add to PATH
-        Add-ToPath $SysmonInstallDir
-        
-        # Install/Register Service
-        $ConfigPath = Join-Path $PSScriptRoot "..\sysmon\sysmon-config.xml"
-        $SysmonBinary = Join-Path $SysmonInstallDir "Sysmon.exe"
-        if (-not (Test-Path $SysmonBinary)) { $SysmonBinary = Join-Path $SysmonInstallDir "Sysmon64.exe" }
-
-        if ($Action -eq "Update") {
-             Start-Service "Sysmon"
-             if (Test-Path $ConfigPath) {
-                 Write-Host "Updating Sysmon config..."
-                 Start-Process -FilePath $SysmonBinary -ArgumentList "-c `"$ConfigPath`"" -Wait -NoNewWindow
-             }
+        if ($NativeFeature.State -ne "Enabled") {
+            Write-Host "  Enabling native Sysmon optional feature..."
+            Enable-WindowsOptionalFeature -Online -FeatureName "Sysmon" -NoRestart -ErrorAction Stop | Out-Null
+            Write-Host "  OK Sysmon feature enabled" -ForegroundColor Green
         } else {
-             if ($Action -eq "Register") {
-                # Already cleaned up above
-             }
-
-             Write-Host "Installing Sysmon Service..."
-             $ArgsList = "-i -accepteula"
-             if (Test-Path $ConfigPath) { $ArgsList = "-i `"$ConfigPath`" -accepteula" }
-             $Process = Start-Process -FilePath $SysmonBinary -ArgumentList $ArgsList -Wait -NoNewWindow -PassThru
-             
-             if ($Process.ExitCode -ne 0) {
-                 Write-Warning "Sysmon installer exited with code $($Process.ExitCode)."
-             }
+            Write-Host "  OK Sysmon feature already enabled" -ForegroundColor Green
         }
-        
-        # Verify Installation
+
+        # Start/reconfigure service
+        # Native Sysmon uses the same CLI surface as Sysinternals Sysmon
+        $SysmonSvc = Get-Service -Name "Sysmon" -ErrorAction SilentlyContinue
+        if (-not $SysmonSvc) { $SysmonSvc = Get-Service -Name "Sysmon64" -ErrorAction SilentlyContinue }
+
+        if (-not $SysmonSvc) {
+            Write-Host "  Installing Sysmon service..."
+            $installArgs = if (Test-Path $SysmonConfig) { "-accepteula -i `"$SysmonConfig`"" } else { "-accepteula -i" }
+            $p = Start-Process -FilePath "sysmon" -ArgumentList $installArgs -Wait -NoNewWindow -PassThru
+            if ($p.ExitCode -ne 0) { Write-Warning "  sysmon -i exited with code $($p.ExitCode)." }
+            else { Write-Host "  OK Sysmon service installed" -ForegroundColor Green }
+        } else {
+            if ($SysmonSvc.Status -ne 'Running') { Start-Service $SysmonSvc.Name }
+            if (Test-Path $SysmonConfig) {
+                Write-Host "  Updating Sysmon config..."
+                Start-Process -FilePath "sysmon" -ArgumentList "-c `"$SysmonConfig`"" -Wait -NoNewWindow | Out-Null
+                Write-Host "  OK Sysmon config updated" -ForegroundColor Green
+            } else {
+                Write-Host "  OK Sysmon already running (no config change)" -ForegroundColor Green
+            }
+        }
+
+        # Verify
         Start-Sleep -Seconds 2
         if (-not (Get-WinEvent -ListLog "Microsoft-Windows-Sysmon/Operational" -ErrorAction SilentlyContinue)) {
-            Write-Error "Sysmon installation failed to register the Event Log channel."
-            Write-Error "Please try running 'C:\Tools\Sysmon\Sysmon.exe -u force' manually, rebooting, and running this script again."
+            Write-Warning "  Sysmon Operational log not yet visible — a reboot may be required after feature install."
         } else {
-            Write-Host "Sysmon $Action complete."
-        }
-    } else {
-        # Ensure service is running if no install/update needed
-        $Svc = Get-Service "Sysmon" -ErrorAction SilentlyContinue
-        if ($Svc -and $Svc.Status -ne 'Running') {
-            Start-Service "Sysmon"
-            Write-Host "Sysmon service started."
+            Write-Host "  OK Microsoft-Windows-Sysmon/Operational log active" -ForegroundColor Green
         }
     }
+}
 
-} catch {
-    Write-Error "Failed to process Sysmon: $_"
+# ── Sysinternals fallback (older OS or native feature not yet shipped) ─────────
+if (-not $UseNative) {
+    if ($OsBuild -ge 26100) {
+        Write-Host "  Native Sysmon feature not available on this build/edition — falling back to Sysinternals." -ForegroundColor Yellow
+    }
+
+    $SysmonUrl = "https://download.sysinternals.com/files/Sysmon.zip"
+    $SysmonInstallDir = Join-Path $InstallPath "Sysmon"
+    $SysmonExeInstalled = Join-Path $SysmonInstallDir "Sysmon.exe"
+    $SysmonZipCached = Join-Path $InstallPath "Sysmon.zip"
+    $SysmonExtractTemp = Join-Path $TempDir "Sysmon"
+
+    try {
+        # 1. Decide if we need to download the ZIP
+        if (Test-ShouldDownload -Url $SysmonUrl -LocalPath $SysmonZipCached) {
+            Write-Host "Downloading Sysmon..."
+            Invoke-WebRequest -Uri $SysmonUrl -OutFile $SysmonZipCached
+        }
+
+        # 2. Extract cached ZIP to temp to check internal EXE version
+        if (Test-Path $SysmonExtractTemp) { Remove-Item $SysmonExtractTemp -Recurse -Force }
+        Expand-ZIP -ZipPath $SysmonZipCached -Dest $SysmonExtractTemp
+
+        # 3. Determine architecture for check
+        $NewSysmonExe = Join-Path $SysmonExtractTemp "Sysmon.exe"
+        if (-not (Test-Path $NewSysmonExe)) { $NewSysmonExe = Join-Path $SysmonExtractTemp "Sysmon64.exe" }
+
+        # 4. Compare Versions
+        $NewVersion = Get-ExeVersion $NewSysmonExe
+        $CurrentVersion = Get-ExeVersion $SysmonExeInstalled
+        $SysmonService = Get-Service "Sysmon" -ErrorAction SilentlyContinue
+
+        $Action = "None"
+        if (-not (Test-Path $SysmonExeInstalled)) {
+            $Action = "Install"
+            Write-Host "Sysmon not found. Installing version $NewVersion..."
+        } elseif ($null -eq $SysmonService) {
+            $Action = "Register"
+            Write-Host "Sysmon files present but service missing. Registering..."
+        } elseif ([version]$CurrentVersion -ne [version]$NewVersion) {
+            $Action = "Update"
+            Write-Host "Sysmon update found ($CurrentVersion -> $NewVersion). Updating..."
+        } else {
+            Write-Host "Sysmon is already up to date ($CurrentVersion)." -ForegroundColor Green
+        }
+
+        # 5. Apply Install/Update if needed
+        if ($Action -ne "None") {
+            if ($SysmonService -and $SysmonService.Status -eq 'Running') {
+                Write-Host "Stopping Sysmon service..."
+                Stop-Service "Sysmon" -Force -ErrorAction SilentlyContinue
+            }
+
+            if ($SysmonService -and ($Action -in "Install", "Register")) {
+                Write-Host "Sysmon service detected. Attempting to uninstall previous instance..."
+                $TempSysmon = Join-Path $SysmonExtractTemp "Sysmon.exe"
+                if (-not (Test-Path $TempSysmon)) { $TempSysmon = Join-Path $SysmonExtractTemp "Sysmon64.exe" }
+                if (Test-Path $TempSysmon) {
+                    Start-Process -FilePath $TempSysmon -ArgumentList "-u -force" -Wait -NoNewWindow -ErrorAction SilentlyContinue
+                } else {
+                    Start-Process -FilePath "sysmon" -ArgumentList "-u -force" -Wait -NoNewWindow -ErrorAction SilentlyContinue
+                }
+                Start-Sleep -Seconds 3
+            }
+
+            if ($Action -in "Install", "Update") {
+                if (!(Test-Path $SysmonInstallDir)) { New-Item -ItemType Directory -Path $SysmonInstallDir -Force | Out-Null }
+                Copy-Item -Path "$SysmonExtractTemp\*" -Destination $SysmonInstallDir -Recurse -Force
+            }
+
+            Add-ToPath $SysmonInstallDir
+
+            $SysmonBinary = Join-Path $SysmonInstallDir "Sysmon.exe"
+            if (-not (Test-Path $SysmonBinary)) { $SysmonBinary = Join-Path $SysmonInstallDir "Sysmon64.exe" }
+
+            if ($Action -eq "Update") {
+                Start-Service "Sysmon"
+                if (Test-Path $SysmonConfig) {
+                    Write-Host "Updating Sysmon config..."
+                    Start-Process -FilePath $SysmonBinary -ArgumentList "-c `"$SysmonConfig`"" -Wait -NoNewWindow
+                }
+            } else {
+                Write-Host "Installing Sysmon Service..."
+                $ArgsList = "-i -accepteula"
+                if (Test-Path $SysmonConfig) { $ArgsList = "-i `"$SysmonConfig`" -accepteula" }
+                $Process = Start-Process -FilePath $SysmonBinary -ArgumentList $ArgsList -Wait -NoNewWindow -PassThru
+                if ($Process.ExitCode -ne 0) { Write-Warning "Sysmon installer exited with code $($Process.ExitCode)." }
+            }
+
+            Start-Sleep -Seconds 2
+            if (-not (Get-WinEvent -ListLog "Microsoft-Windows-Sysmon/Operational" -ErrorAction SilentlyContinue)) {
+                Write-Error "Sysmon installation failed to register the Event Log channel."
+                Write-Error "Please try running 'C:\Tools\Sysmon\Sysmon.exe -u force' manually, rebooting, and running this script again."
+            } else {
+                Write-Host "Sysmon $Action complete."
+            }
+        } else {
+            $Svc = Get-Service "Sysmon" -ErrorAction SilentlyContinue
+            if ($Svc -and $Svc.Status -ne 'Running') {
+                Start-Service "Sysmon"
+                Write-Host "Sysmon service started."
+            }
+        }
+
+    } catch {
+        Write-Error "Failed to process Sysmon: $_"
+    }
 }
 
 # --- 2. Install/Update Fluent Bit ---

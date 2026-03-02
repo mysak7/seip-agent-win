@@ -1,116 +1,156 @@
-# SentAgentWin
+# seip-agent-win
 
-This project provides the Windows agent component for the Sentinel system, handling the installation, configuration, and orchestration of security monitoring tools (Sysmon and Fluent Bit).
+Windows agent for the Sentinel SEIP platform. Collects security events via Sysmon + Fluent Bit and streams them to Kafka.
 
-## Quick start (all commands as Administrator)
+---
+
+## Prerequisites
+
+> All commands below must be run in **PowerShell as Administrator**.
+
+### 1. Install Git (via winget)
 
 ```powershell
-# 1. Install dependencies (Sysmon, Fluent Bit, NSSM)
-.\scripts\Install-Prerequisites.ps1
+winget install --id Git.Git --silent --accept-package-agreements --accept-source-agreements
+```
 
-# 2. One-time audit policy hardening
+Reload PATH in the current session:
+
+```powershell
+$env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" +
+            [System.Environment]::GetEnvironmentVariable("Path","User")
+```
+
+### 2. Clone the repository
+
+```powershell
+git clone https://github.com/mysak7/seip-agent-win.git
+cd seip-agent-win
+```
+
+### 3. Set credentials
+
+The agent needs three environment variables (or a `.env` file in the repo root):
+
+```
+PRODUCER_API_KEY=<your-api-key>
+PRODUCER_API_SECRET=<your-api-secret>
+BOOTSTRAP_SERVER=<kafka-broker-url>
+```
+
+**Option A — environment variables (recommended for production):**
+
+```powershell
+[System.Environment]::SetEnvironmentVariable("PRODUCER_API_KEY",    "xxx", "Machine")
+[System.Environment]::SetEnvironmentVariable("PRODUCER_API_SECRET", "xxx", "Machine")
+[System.Environment]::SetEnvironmentVariable("BOOTSTRAP_SERVER",    "xxx", "Machine")
+```
+
+**Option B — `.env` file (local dev only, never commit this file):**
+
+```
+# .env
+PRODUCER_API_KEY=xxx
+PRODUCER_API_SECRET=xxx
+BOOTSTRAP_SERVER=xxx
+```
+
+---
+
+## Quick Install (single command)
+
+After cloning, run the all-in-one bootstrap script from the repo root:
+
+```powershell
+.\Setup-Sentinel.ps1
+```
+
+This runs all four setup scripts in the correct order and verifies the services at the end.
+
+---
+
+## Manual Step-by-Step Install
+
+If you prefer to run each step individually:
+
+```powershell
+# 1. Harden Windows audit policy (event log sizes, auditpol, SACLs, PS logging)
 .\scripts\maintenance\Initialize-WindowsAudit.ps1
 
-# 3. Install Fluent Bit as a least-privilege service
+# 2. Install Sysmon, Fluent Bit, and NSSM
+.\scripts\Install-Prerequisites.ps1
+
+# 3. Install SentinelAgent as a least-privilege Windows service
 .\scripts\Install-SentinelService.ps1
 
-# 4. Install the Lua filter watcher (hot-reload from S3)
+# 4. Install SentinelLuaWatcher (hot-reloads Lua filter from S3)
 .\scripts\Install-LuaWatcherService.ps1
 
 # 5. Verify
 Get-Service SentinelAgent, SentinelLuaWatcher | Format-Table Name, Status, StartType
 ```
 
-For the full security model and runtime management commands see
-[docs/audit-setup.md](docs/audit-setup.md).
+---
+
+## Post-install — Deploy updates
+
+After a `git pull` that changes Lua filters or audit policy:
+
+```powershell
+.\scripts\Deploy-SentinelUpdates.ps1
+```
+
+This re-deploys Lua files, re-applies audit policies and SACLs, and restarts the service only when something actually changed.
 
 ---
 
-## Scripts Overview
+## Service management
 
-### Configuration
-*   **`config.yaml`**
-    *   Defines installation paths and watcher tuning:
-        *   `AgentPath`: Root directory for agent configuration and logs (default: `C:\APPS\Sentinel`).
-        *   `ToolsPath`: Directory for utility binaries (default: `C:\APPS\Sentinel\.tools`).
-        *   `LuaWatcherSchedule`: Documents the fixed poll schedule (every 5 min, clock-aligned to `:07/:12/:17/...`).
+```powershell
+nssm stop    SentinelAgent
+nssm start   SentinelAgent
+nssm restart SentinelAgent
+nssm remove  SentinelAgent confirm
 
-### Installation & Setup
+nssm stop    SentinelLuaWatcher
+nssm start   SentinelLuaWatcher
+nssm restart SentinelLuaWatcher
+nssm remove  SentinelLuaWatcher confirm
+```
 
-*   **`scripts/Install-Prerequisites.ps1`**
-    *   **Purpose:** Prepares the system with necessary dependencies.
-    *   **What it does:**
-        *   Checks for and acquires Administrator privileges.
-        *   Downloads and installs/updates **Sysmon**, **Fluent Bit**, and **NSSM**.
+Logs are in `C:\APPS\Sentinel\logs\` by default (configurable via `config.yaml`).
 
-*   **`scripts/Install-SentinelService.ps1`**
-    *   **Purpose:** Installs the Sentinel Agent as a Windows Service (least-privilege).
-    *   **Prerequisites:** NSSM must be installed and in PATH.
-    *   **What it does:**
-        *   **Requires Administrator privileges** (installer only — service itself runs as a limited account).
-        *   Installs `SentinelAgent` service that runs `launcher.ps1` under the **`NT SERVICE\SentinelAgent`** Virtual Service Account.
-        *   Grants the account Full Control on `$AgentPath` and adds it to the **Event Log Readers** group.
-        *   Configures auto-start, restart-on-failure, and log rotation.
-        *   Removes any previous installation before re-installing.
+---
 
-*   **`scripts/Watch-LuaFilter.ps1`**
-    *   **Purpose:** Background watcher that hot-reloads the LLM noise filter when a new version is published to S3.
-    *   **What it does:**
-        *   Polls `noise_filter.meta` on S3 every 5 minutes, clock-aligned to `:07/:12/:17/...`.
-        *   Compares the `ts` field against `$AgentPath\lua_filter.state`.
-        *   On change: downloads `noise_filter.lua`, saves the new `ts`, restarts `SentinelAgent`.
-        *   Runs continuously as a service; managed by `Install-LuaWatcherService.ps1`.
+## Scripts reference
 
-*   **`scripts/Install-LuaWatcherService.ps1`**
-    *   **Purpose:** Installs `Watch-LuaFilter.ps1` as a Windows Service (least-privilege).
-    *   **Prerequisites:** NSSM installed; `SentinelAgent` service must already exist.
-    *   **What it does:**
-        *   **Requires Administrator privileges** (installer only).
-        *   Installs `SentinelLuaWatcher` service under the **`NT SERVICE\SentinelLuaWatcher`** Virtual Service Account.
-        *   Grants the account Modify on `$AgentPath` (for Lua file, state file, logs).
-        *   Delegates **Start + Stop + QueryStatus** rights on `SentinelAgent` via SDDL — no other elevated privileges.
-        *   See [docs/audit-setup.md](docs/audit-setup.md) for the full installation walkthrough.
+| Script | Run as | Purpose |
+|---|---|---|
+| `Setup-Sentinel.ps1` | Admin | All-in-one bootstrap — calls all scripts below in order |
+| `scripts/maintenance/Initialize-WindowsAudit.ps1` | Admin | One-time audit policy hardening (event log sizes, auditpol, registry SACLs, PS Script Block Logging) |
+| `scripts/Install-Prerequisites.ps1` | Admin | Installs/updates Sysmon, Fluent Bit, and NSSM |
+| `scripts/Install-SentinelService.ps1` | Admin | Installs `SentinelAgent` service (Fluent Bit, least-privilege VSA) |
+| `scripts/Install-LuaWatcherService.ps1` | Admin | Installs `SentinelLuaWatcher` service (S3 hot-reload watcher) |
+| `scripts/Deploy-SentinelUpdates.ps1` | Admin | Deploys repo changes to a running installation |
+| `scripts/launcher.ps1` | Service | Started by NSSM — injects credentials and runs Fluent Bit |
+| `scripts/Watch-LuaFilter.ps1` | Service | Polls S3 for updated `noise_filter.lua`, hot-reloads on change |
+| `scripts/maintenance/Test-FluentBit.ps1` | Admin | Debug mode — runs Fluent Bit to stdout (no Kafka) |
+| `scripts/maintenance/Uninstall-SentinelService.ps1` | Admin | Removes the `SentinelAgent` service |
 
-### Runtime & Orchestration
+---
 
-*   **`scripts/launcher.ps1`**
-    *   **Purpose:** A bootstrapper to securely launch the Fluent Bit agent.
-    *   **What it does:**
-        *   Verifies Sysmon availability.
-        *   Retrieves sensitive credentials (API keys, secrets) from the `.env` file.
-        *   Generates a runtime configuration file by injecting secrets into a template.
-        *   Starts the Fluent Bit process with the generated configuration.
+## Configuration
 
-### Utility / Maintenance
+Edit `config.yaml` before first install to change install paths:
 
-*   **`scripts/maintenance/Initialize-WindowsAudit.ps1`**
-    *   **Purpose:** One-time endpoint hardening — configures Windows to emit the exact event IDs consumed by the agent.
-    *   **Requires Administrator privileges.**
-    *   **What it does:**
-        *   Resizes Security / System / PowerShell / WMI / TaskScheduler logs to prevent rotation data-loss.
-        *   Enables high-signal audit subcategories only (Logon, Sensitive Privilege Use, Process Creation, Registry, Scheduled Tasks, Services, Anti-Forensics).
-        *   Enables PowerShell Script Block Logging (EID 4104).
-        *   Places Registry SACLs on Run keys, AppInit_DLLs, and LSA secrets so EID 4657 fires on writes.
-        *   Enables the WMI-Activity/Operational log (EIDs 5859–5861).
-    *   See [docs/audit-setup.md](docs/audit-setup.md) for the full EID mapping.
+```yaml
+AgentPath: "C:\APPS\Sentinel"       # agent config, Lua files, logs
+ToolsPath: "C:\APPS\Sentinel\.tools" # Sysmon, Fluent Bit binaries
+```
 
-*   **`scripts/maintenance/Test-FluentBit.ps1`**
-    *   **Purpose:** Diagnostic — runs Fluent Bit in debug mode (stdout instead of Kafka) to verify the Lua filter.
-    *   See [docs/testing.md](docs/testing.md) for usage and expected output.
+---
 
-*   **`scripts/maintenance/Uninstall-SentinelService.ps1`**
-    *   **Purpose:** Removes the `SentinelAgent` Windows Service.
-    *   **Requires Administrator privileges.**
+## Further reading
 
-*   **`copy_to_rbac.bat`**
-    *   **Purpose:** Backs up or deploys the current local project to a remote network location.
-    *   **What it does:**
-        *   Copies the current directory contents to `\\rbac\home\Github\[ProjectName]`.
-        *   Uses `robocopy` for efficient mirroring.
-        *   Excludes hidden directories (like `.git`).
-
-*   **`copy_from_rbac.bat`**
-    *   **Purpose:** Restores or updates the local project from the remote network location.
-    *   **What it does:**
-        *   Copies contents *from* `\\rbac\home\Github\[ProjectName]` to the current local directory.
-        *   Uses `robocopy` to mirror the remote state locally.
+- [docs/audit-setup.md](docs/audit-setup.md) — full EID mapping and security model
+- [docs/testing.md](docs/testing.md) — using `Test-FluentBit.ps1`
