@@ -136,7 +136,7 @@ if ($OsBuild -ge 26100) {
         # Verify
         Start-Sleep -Seconds 2
         if (-not (Get-WinEvent -ListLog "Microsoft-Windows-Sysmon/Operational" -ErrorAction SilentlyContinue)) {
-            Write-Warning "  Sysmon Operational log not yet visible — a reboot may be required after feature install."
+            Write-Warning "  Sysmon Operational log not yet visible - a reboot may be required after feature install."
         } else {
             Write-Host "  OK Microsoft-Windows-Sysmon/Operational log active" -ForegroundColor Green
         }
@@ -146,7 +146,7 @@ if ($OsBuild -ge 26100) {
 # ── Sysinternals fallback (older OS or native feature not yet shipped) ─────────
 if (-not $UseNative) {
     if ($OsBuild -ge 26100) {
-        Write-Host "  Native Sysmon feature not available on this build/edition — falling back to Sysinternals." -ForegroundColor Yellow
+        Write-Host "  Native Sysmon feature not available on this build/edition - falling back to Sysinternals." -ForegroundColor Yellow
     }
 
     $SysmonUrl = "https://download.sysinternals.com/files/Sysmon.zip"
