@@ -6,6 +6,8 @@ Windows agent for the Sentinel SEIP platform. Collects security events via Sysmo
 
 ## Prerequisites
 
+winget install --id Microsoft.PowerShell --source winget
+
 > All commands below must be run in **PowerShell as Administrator**.
 
 ### 1. Install Git (via winget)
