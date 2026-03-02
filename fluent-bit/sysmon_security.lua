@@ -264,6 +264,7 @@ local function filter_process_create(timestamp, record)
     local interesting_tools = {
         "cmd.exe", "net.exe", "net1.exe", "schtasks.exe",
         "taskkill.exe", "sc.exe", "reg.exe", "at.exe",
+        "werfaultsecure.exe",  -- EDR-Freeze: secure error-reporting can be abused to suspend/dump EDR process
     }
     if matches_any(image_base, interesting_tools) then return 0, timestamp, record end
 
