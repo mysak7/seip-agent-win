@@ -54,3 +54,5 @@ $RECYCLE.BIN/
 # Project Specific
 consumer.log
 scripts/sysmon.sqlite
+consolidate_code.py
+full_codebase_context.txt
