@@ -68,7 +68,8 @@ $auditPolicies = @(
     # ── Credential Use ────────────────────────────────────────────────────────
     @{ sub = "Sensitive Privilege Use"; sf = "success,failure" },  # 4673, 4674
     # ── Process Tracking ──────────────────────────────────────────────────────
-    @{ sub = "Process Creation";  sf = "success"          },  # 4688 (with cmdline)
+    @{ sub = "Process Creation";    sf = "success"          },  # 4688 (with cmdline)
+    @{ sub = "Process Termination"; sf = "success"          },  # 4689 (enables Create→Delete→StillRunning correlation for Process Ghosting)
     # ── Object Access ─────────────────────────────────────────────────────────
     @{ sub = "Registry";          sf = "success,failure"  },  # 4657 (requires SACL, see step 4)
     # ── Persistence ───────────────────────────────────────────────────────────
