@@ -12,6 +12,10 @@
       4. Install SentinelLuaWatcher as a Windows service
       5. Verify both services are running
 
+.PARAMETER SkipLogResize
+    Pass -SkipLogResize to skip event log size increases in the Windows Audit Setup step.
+    Useful when log sizes are already managed by GPO or a previous run.
+
 .NOTES
     Must be run as Administrator.
     Credentials must be set as environment variables (or in a .env file in the repo root):
@@ -19,6 +23,9 @@
         PRODUCER_API_SECRET
         BOOTSTRAP_SERVER
 #>
+param(
+    [switch]$SkipLogResize
+)
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = $PSScriptRoot
@@ -38,14 +45,14 @@ if (-not (Test-Path (Join-Path $RepoRoot "config.yaml"))) {
 
 # ── Helper ────────────────────────────────────────────────────────────────────
 function Invoke-Step {
-    param([string]$Label, [string]$ScriptPath)
+    param([string]$Label, [string]$ScriptPath, [hashtable]$ScriptArgs = @{})
     Write-Host ""
     Write-Host "--- $Label ---" -ForegroundColor Yellow
     if (-not (Test-Path $ScriptPath)) {
         Write-Error "Script not found: $ScriptPath"
         exit 1
     }
-    & $ScriptPath
+    & $ScriptPath @ScriptArgs
     if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
         Write-Error "$Label failed with exit code $LASTEXITCODE"
         exit $LASTEXITCODE
@@ -54,7 +61,7 @@ function Invoke-Step {
 }
 
 # ── Step 1: Windows audit policy (run first — idempotent, no deps) ────────────
-Invoke-Step "Windows Audit Setup" (Join-Path $RepoRoot "scripts\maintenance\Initialize-WindowsAudit.ps1")
+Invoke-Step "Windows Audit Setup" (Join-Path $RepoRoot "scripts\maintenance\Initialize-WindowsAudit.ps1") @{ SkipLogResize = $SkipLogResize }
 
 # ── Step 2: Install Sysmon, Fluent Bit, NSSM ─────────────────────────────────
 Invoke-Step "Install Prerequisites" (Join-Path $RepoRoot "scripts\Install-Prerequisites.ps1")

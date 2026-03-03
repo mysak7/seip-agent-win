@@ -352,6 +352,25 @@ if (-not (Get-Command nssm -ErrorAction SilentlyContinue)) {
     Write-Host "NSSM is already installed." -ForegroundColor Green
 }
 
+# ── Deploy NSSM to tools directory (required for VSA service accounts) ────────
+# winget installs NSSM to C:\Users\...\AppData which NT SERVICE\* Virtual Service
+# Accounts cannot access. The SCM calls CreateProcessAsUser() with the VSA token,
+# and Windows checks that the VSA can read the service binary — if not, StartService
+# fails with ERROR_ACCESS_DENIED (5). Copying nssm.exe to $InstallPath
+# (C:\APPS\Sentinel\.tools) which VSAs already have Full Control on fixes this.
+$NssmCmd = Get-Command nssm -ErrorAction SilentlyContinue
+if ($NssmCmd) {
+    $NssmDest = Join-Path $InstallPath "nssm.exe"
+    if (-not (Test-Path $NssmDest)) {
+        Write-Host "  Deploying NSSM to $NssmDest for VSA service accounts..."
+        Copy-Item -Path $NssmCmd.Source -Destination $NssmDest -Force
+        Write-Host "  OK NSSM deployed to tools directory" -ForegroundColor Green
+    } else {
+        Write-Host "  NSSM already deployed at $NssmDest" -ForegroundColor DarkGray
+    }
+    Add-ToPath $InstallPath
+}
+
 # Cleanup Temp
 if (Test-Path $TempDir) { Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue }
 
