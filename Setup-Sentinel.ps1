@@ -60,6 +60,21 @@ function Invoke-Step {
     Write-Host "  OK $Label" -ForegroundColor Green
 }
 
+# ── Pre-flight: remove existing services so install steps are idempotent ─────
+# Remove LuaWatcher before SentinelAgent (dependency order).
+foreach ($svcName in @("SentinelLuaWatcher", "SentinelAgent")) {
+    if (Get-Service $svcName -ErrorAction SilentlyContinue) {
+        Write-Host "Removing existing $svcName service..." -ForegroundColor Yellow
+        & sc.exe stop $svcName | Out-Null
+        Start-Sleep -Seconds 2
+        if (Get-Command nssm -ErrorAction SilentlyContinue) {
+            nssm remove $svcName confirm
+        } else {
+            & sc.exe delete $svcName | Out-Null
+        }
+    }
+}
+
 # ── Step 1: Windows audit policy (run first — idempotent, no deps) ────────────
 Invoke-Step "Windows Audit Setup" (Join-Path $RepoRoot "scripts\maintenance\Initialize-WindowsAudit.ps1") @{ SkipLogResize = $SkipLogResize }
 
