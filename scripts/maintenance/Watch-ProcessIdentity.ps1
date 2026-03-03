@@ -36,29 +36,29 @@ function Write-Log {
 
 function Get-ProcessOwner([int]$ProcId) {
     try {
-        $wmi = Get-WmiObject Win32_Process -Filter "ProcessId=$ProcId" -ErrorAction Stop
-        if (-not $wmi) { return "N/A (process gone)" }
-        $owner = $wmi.GetOwner()
+        $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcId" -ErrorAction Stop
+        if (-not $cim) { return "N/A (process gone)" }
+        $owner = Invoke-CimMethod -InputObject $cim -MethodName GetOwner -ErrorAction Stop
         if ($owner.ReturnValue -eq 0) {
             return "$($owner.Domain)\$($owner.User)"
         }
         return "GetOwner() failed (rv=$($owner.ReturnValue))"
-    } catch { return "WMI error: $_" }
+    } catch { return "CIM error: $_" }
 }
 
 function Get-ProcessCommandLine([int]$ProcId) {
     try {
-        $wmi = Get-WmiObject Win32_Process -Filter "ProcessId=$ProcId" -ErrorAction Stop
-        return if ($wmi.CommandLine) { $wmi.CommandLine.Trim() } else { "<empty>" }
+        $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcId" -ErrorAction Stop
+        return if ($cim.CommandLine) { $cim.CommandLine.Trim() } else { "<empty>" }
     } catch { return "N/A" }
 }
 
 function Get-ParentInfo([int]$ProcId) {
     try {
-        $wmi = Get-WmiObject Win32_Process -Filter "ProcessId=$ProcId" -ErrorAction Stop
-        if (-not $wmi) { return "N/A" }
-        $ppid = $wmi.ParentProcessId
-        $parent = Get-WmiObject Win32_Process -Filter "ProcessId=$ppid" -ErrorAction SilentlyContinue
+        $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcId" -ErrorAction Stop
+        if (-not $cim) { return "N/A" }
+        $ppid = $cim.ParentProcessId
+        $parent = Get-CimInstance Win32_Process -Filter "ProcessId=$ppid" -ErrorAction SilentlyContinue
         $parentName = if ($parent) { $parent.Name } else { "<gone>" }
         return "PID=$ppid ($parentName)"
     } catch { return "N/A" }
@@ -66,12 +66,12 @@ function Get-ParentInfo([int]$ProcId) {
 
 function Get-ServiceForPid([int]$ProcId) {
     try {
-        $svc = Get-WmiObject Win32_Service | Where-Object { $_.ProcessId -eq $ProcId }
+        $svc = Get-CimInstance Win32_Service | Where-Object { $_.ProcessId -eq $ProcId }
         if ($svc) { return "$($svc.Name) [$($svc.StartName)]" }
         # Check parent PID too
-        $wmi   = Get-WmiObject Win32_Process -Filter "ProcessId=$ProcId" -ErrorAction SilentlyContinue
-        $ppid  = if ($wmi) { $wmi.ParentProcessId } else { 0 }
-        $psvc  = Get-WmiObject Win32_Service | Where-Object { $_.ProcessId -eq $ppid }
+        $cim   = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcId" -ErrorAction SilentlyContinue
+        $ppid  = if ($cim) { $cim.ParentProcessId } else { 0 }
+        $psvc  = Get-CimInstance Win32_Service | Where-Object { $_.ProcessId -eq $ppid }
         if ($psvc) { return "via parent svc: $($psvc.Name) [$($psvc.StartName)]" }
         return "-"
     } catch { return "N/A" }
@@ -83,7 +83,7 @@ Write-Log "=== Watch-ProcessIdentity started ==="
 Write-Log "Logging to: $LogFile"
 
 foreach ($svcName in @("SentinelAgent", "SentinelLuaWatcher")) {
-    $svc = Get-WmiObject Win32_Service -Filter "Name='$svcName'" -ErrorAction SilentlyContinue
+    $svc = Get-CimInstance Win32_Service -Filter "Name='$svcName'" -ErrorAction SilentlyContinue
     if ($svc) {
         Write-Log ("SERVICE DUMP  Name={0}  StartName={1}  State={2}  PathName={3}" -f `
             $svc.Name, $svc.StartName, $svc.State, $svc.PathName)
