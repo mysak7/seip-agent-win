@@ -53,8 +53,15 @@ nssm set $ServiceName Start        SERVICE_AUTO_START
 Write-Host "Configuring Virtual Service Account (NT SERVICE\$ServiceName) via sc.exe..."
 $scResult = & sc.exe config $ServiceName obj= "NT SERVICE\$ServiceName" password= ""
 if ($LASTEXITCODE -ne 0) {
-    Write-Warning "sc.exe config returned $LASTEXITCODE. Output: $scResult"
+    Write-Error "sc.exe config failed (exit $LASTEXITCODE): $scResult"
+    exit 1
 }
+$startName = (& sc.exe qc $ServiceName | Select-String "SERVICE_START_NAME").ToString().Trim()
+if ($startName -notmatch [regex]::Escape("NT SERVICE\$ServiceName")) {
+    Write-Error "VSA not applied — sc.exe qc reports: $startName"
+    exit 1
+}
+Write-Host "  Verified: $startName" -ForegroundColor Green
 
 # Restart on failure
 nssm set $ServiceName AppExit Default Restart
