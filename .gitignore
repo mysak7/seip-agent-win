@@ -56,3 +56,4 @@ consumer.log
 scripts/sysmon.sqlite
 consolidate_code.py
 full_codebase_context.txt
+.claude/settings.local.json
