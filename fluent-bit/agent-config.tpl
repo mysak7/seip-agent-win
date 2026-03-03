@@ -86,4 +86,6 @@
     rdkafka.sasl.mechanism        PLAIN
     rdkafka.sasl.username         {{KAFKA_USER}}
     rdkafka.sasl.password         {{KAFKA_PASS}}
-    rdkafka.compression.codec     lz4
+    rdkafka.compression.codec        lz4
+    rdkafka.socket.keepalive.enable  true
+    rdkafka.connections.max.idle.ms  180000
