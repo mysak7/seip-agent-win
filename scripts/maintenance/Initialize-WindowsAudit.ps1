@@ -14,13 +14,23 @@
       3. PowerShell SBL   — EID 4104 (Script Block Logging)
       4. Registry SACLs   — EID 4657 on persistence / credential keys
       5. WMI log          — enables Microsoft-Windows-WMI-Activity/Operational
+
+.PARAMETER SkipLogResize
+    Skip step 1 (event log size increases). Useful when log sizes are already
+    managed by GPO or a previous run.
 #>
+param(
+    [switch]$SkipLogResize
+)
 
 Write-Host "=== Windows Security Audit Setup (PRODUCTION) ===" -ForegroundColor Cyan
 
 # ─────────────────────────────────────────────
 # 1. RESIZE EVENT LOGS (Prevents data loss)
 # ─────────────────────────────────────────────
+if ($SkipLogResize) {
+    Write-Host "`n[1/5] Skipping Event Log resize (-SkipLogResize)." -ForegroundColor DarkGray
+} else {
 Write-Host "`n[1/5] Increasing Event Log sizes..." -ForegroundColor Yellow
 
 # Classic Logs (PowerShell cmdlet)
@@ -49,6 +59,7 @@ foreach ($logName in $operationalLogs.Keys) {
         Write-Host "  OK $logName resized to $([math]::Round($size/1MB)) MB" -ForegroundColor Green
     }
 }
+} # end -not SkipLogResize
 
 # ─────────────────────────────────────────────
 # 2. AUDIT POLICIES (High Signal Only)

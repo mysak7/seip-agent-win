@@ -54,15 +54,20 @@ try {
     $BrokerUrl = $env:BOOTSTRAP_SERVER
 
     if (-not $KafkaUser -or -not $KafkaPass -or -not $BrokerUrl) {
-         # Fallback to loading from .env file if env vars are missing (local dev scenario)
-         if (Test-Path "$PSScriptRoot\..\.env") {
-            Write-Host "Loading credentials from .env file..."
-            foreach ($line in Get-Content "$PSScriptRoot\..\.env") {
+        # Fallback to .env file. Check two locations:
+        #   1. Repo root  — works when running manually as an interactive user
+        #   2. $AgentPath — works when running as NT SERVICE\SentinelAgent (VSA has Full Control
+        #      on $AgentPath but no access to the user-profile repo directory)
+        $envCandidates = @("$PSScriptRoot\..\.env", (Join-Path $AgentPath ".env"))
+        $envFile = $envCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+        if ($envFile) {
+            Write-Host "Loading credentials from .env file ($envFile)..."
+            foreach ($line in Get-Content $envFile) {
                 if ($line -match "^PRODUCER_API_KEY=(.*)") { $KafkaUser = $matches[1].Trim() }
                 if ($line -match "^PRODUCER_API_SECRET=(.*)") { $KafkaPass = $matches[1].Trim() }
                 if ($line -match "^BOOTSTRAP_SERVER=(.*)") { $BrokerUrl = $matches[1].Trim() }
             }
-         }
+        }
     }
 
     if (-not $KafkaUser -or -not $KafkaPass -or -not $BrokerUrl) {

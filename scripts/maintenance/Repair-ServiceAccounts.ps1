@@ -14,7 +14,9 @@ foreach ($svcName in @("SentinelAgent", "SentinelLuaWatcher")) {
     Start-Sleep -Seconds 3
 
     Write-Host "Setting NT SERVICE\$svcName as logon account..."
-    $result = & sc.exe config $svcName obj= "NT SERVICE\$svcName" password= ""
+    # Omit password= entirely so sc.exe passes lpPassword=NULL to ChangeServiceConfig.
+    # Passing password= "" sends an empty string, which Windows rejects for VSAs (error 1057).
+    $result = & sc.exe config $svcName obj= "NT SERVICE\$svcName"
     if ($LASTEXITCODE -ne 0) {
         Write-Error "sc.exe config failed (exit $LASTEXITCODE): $result"
         continue
