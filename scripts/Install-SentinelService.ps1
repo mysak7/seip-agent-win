@@ -44,6 +44,23 @@ foreach ($dir in @($AgentPath, $LogDir)) {
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
 }
 
+# --- Deploy launcher and Fluent Bit assets to $AgentPath ---
+# Running scripts from C:\Users\...\Documents\... while executing as a privileged VSA
+# is a Local Privilege Escalation vector: any process running as the installing user
+# can modify the script. $AgentPath (C:\APPS\Sentinel) is admin-only writable.
+Write-Host "Deploying launcher and config assets to $AgentPath..."
+$FluentBitSrcDir = Join-Path $PSScriptRoot "..\fluent-bit"
+Copy-Item -Path $LauncherScript -Destination (Join-Path $AgentPath "launcher.ps1") -Force
+foreach ($asset in @("agent-config.tpl", "sysmon_security.lua", "sysmon_pack.lua")) {
+    $src = Join-Path $FluentBitSrcDir $asset
+    if (Test-Path $src) {
+        Copy-Item -Path $src -Destination (Join-Path $AgentPath $asset) -Force
+        Write-Host "  Deployed $asset" -ForegroundColor DarkGray
+    }
+}
+# Point the service registration at the deployed (admin-controlled) copy
+$LauncherScript = Join-Path $AgentPath "launcher.ps1"
+
 # --- Create service ---
 Write-Host "Installing $ServiceName..."
 nssm install $ServiceName "powershell.exe" "-ExecutionPolicy Bypass -NoProfile -File `"$LauncherScript`""

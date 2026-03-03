@@ -21,12 +21,17 @@ if (-not (Test-Path $ConfigPath)) {
 }
 
 # 1. Define paths
-$LocalTemplatePath  = Join-Path $PSScriptRoot "..\fluent-bit\agent-config.tpl"
-$LocalConfigPath    = Join-Path $AgentPath "fluent-bit.conf"
-$LocalLuaPath       = Join-Path $AgentPath "sysmon_security.lua"
-$RepoLuaPath        = Join-Path $PSScriptRoot "..\fluent-bit\sysmon_security.lua"
-$LocalPackLuaPath   = Join-Path $AgentPath "sysmon_pack.lua"
-$RepoPackLuaPath    = Join-Path $PSScriptRoot "..\fluent-bit\sysmon_pack.lua"
+# Template and Lua sources: prefer repo location (interactive dev runs), fall back to
+# $AgentPath (deployed service runs where $PSScriptRoot IS $AgentPath and no repo exists).
+$_repoFbDir        = Join-Path $PSScriptRoot "..\fluent-bit"
+$LocalTemplatePath = if (Test-Path (Join-Path $_repoFbDir "agent-config.tpl")) {
+                         Join-Path $_repoFbDir "agent-config.tpl"
+                     } else { Join-Path $AgentPath "agent-config.tpl" }
+$LocalConfigPath   = Join-Path $AgentPath "fluent-bit.conf"
+$LocalLuaPath      = Join-Path $AgentPath "sysmon_security.lua"
+$RepoLuaPath       = Join-Path $_repoFbDir "sysmon_security.lua"
+$LocalPackLuaPath  = Join-Path $AgentPath "sysmon_pack.lua"
+$RepoPackLuaPath   = Join-Path $_repoFbDir "sysmon_pack.lua"
 $LocalLlmLuaPath    = Join-Path $AgentPath "llm_filter.lua"
 $LlmLuaUrl          = "https://mysak7-seip-lua.s3.eu-central-1.amazonaws.com/noise_filter.lua"
 $FluentBitExe       = Join-Path $ToolsPath "fluent-bit\bin\fluent-bit.exe"
@@ -105,12 +110,12 @@ $FinalConfig = $Template -replace "{{BROKER_URL}}",  $BrokerUrl `
 # 5. Deploy Lua filter scripts alongside the config
 if (Test-Path $RepoLuaPath) {
     Copy-Item -Path $RepoLuaPath -Destination $LocalLuaPath -Force
-} else {
+} elseif (-not (Test-Path $LocalLuaPath)) {
     Write-Warning "Lua filter script not found at $RepoLuaPath - security filtering will be disabled."
 }
 if (Test-Path $RepoPackLuaPath) {
     Copy-Item -Path $RepoPackLuaPath -Destination $LocalPackLuaPath -Force
-} else {
+} elseif (-not (Test-Path $LocalPackLuaPath)) {
     Write-Warning "Lua pack script not found at $RepoPackLuaPath - payload compaction will be disabled."
 }
 try {
