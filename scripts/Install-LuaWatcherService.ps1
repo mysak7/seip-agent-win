@@ -52,6 +52,14 @@ if (Get-Service $ServiceName -ErrorAction SilentlyContinue) {
 $LogDir = Join-Path $AgentPath "logs"
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
 
+# --- Deploy watcher script to $AgentPath ---
+# Running Watch-LuaFilter.ps1 from C:\Users\...\Documents\... while executing as a privileged VSA
+# is a Local Privilege Escalation vector: any process running as the installing user can modify
+# the script and have it executed with the VSA's privileges. $AgentPath is admin-only writable.
+Write-Host "Deploying Watch-LuaFilter.ps1 to $AgentPath..."
+Copy-Item -Path $WatcherScript -Destination (Join-Path $AgentPath "Watch-LuaFilter.ps1") -Force
+$WatcherScript = Join-Path $AgentPath "Watch-LuaFilter.ps1"
+
 # --- Create service ---
 Write-Host "Installing $ServiceName..."
 nssm install $ServiceName "powershell.exe" "-ExecutionPolicy Bypass -NoProfile -File `"$WatcherScript`""

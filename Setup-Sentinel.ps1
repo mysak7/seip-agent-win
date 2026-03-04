@@ -12,9 +12,9 @@
       4. Install SentinelLuaWatcher as a Windows service
       5. Verify both services are running
 
-.PARAMETER SkipLogResize
-    Pass -SkipLogResize to skip event log size increases in the Windows Audit Setup step.
-    Useful when log sizes are already managed by GPO or a previous run.
+.PARAMETER ResizeLogs
+    Pass -ResizeLogs to increase event log sizes in the Windows Audit Setup step.
+    By default, log sizes are left unchanged.
 
 .NOTES
     Must be run as Administrator.
@@ -24,7 +24,7 @@
         BOOTSTRAP_SERVER
 #>
 param(
-    [switch]$SkipLogResize
+    [switch]$ResizeLogs
 )
 
 $ErrorActionPreference = "Stop"
@@ -76,7 +76,7 @@ foreach ($svcName in @("SentinelLuaWatcher", "SentinelAgent")) {
 }
 
 # ── Step 1: Windows audit policy (run first — idempotent, no deps) ────────────
-Invoke-Step "Windows Audit Setup" (Join-Path $RepoRoot "scripts\maintenance\Initialize-WindowsAudit.ps1") @{ SkipLogResize = $SkipLogResize }
+Invoke-Step "Windows Audit Setup" (Join-Path $RepoRoot "scripts\maintenance\Initialize-WindowsAudit.ps1") @{ SkipLogResize = (-not $ResizeLogs) }
 
 # ── Step 2: Install Sysmon, Fluent Bit, NSSM ─────────────────────────────────
 Invoke-Step "Install Prerequisites" (Join-Path $RepoRoot "scripts\Install-Prerequisites.ps1")
