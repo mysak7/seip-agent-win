@@ -120,7 +120,7 @@ nssm restart SentinelLuaWatcher
 nssm remove  SentinelLuaWatcher confirm
 ```
 
-Logs are in `C:\APPS\Sentinel\logs\` by default (configurable via `config.yaml`).
+Logs are in `C:\ProgramData\SEIP\logs\` by default (configurable via `config.yaml`).
 
 ---
 
@@ -146,8 +146,8 @@ Logs are in `C:\APPS\Sentinel\logs\` by default (configurable via `config.yaml`)
 Edit `config.yaml` before first install to change install paths:
 
 ```yaml
-AgentPath: "C:\APPS\Sentinel"       # agent config, Lua files, logs
-ToolsPath: "C:\APPS\Sentinel\.tools" # Sysmon, Fluent Bit binaries
+AgentPath: "C:\ProgramData\SEIP"       # agent config, Lua files, logs
+ToolsPath: "C:\ProgramData\SEIP\.tools" # Sysmon, Fluent Bit binaries
 ```
 
 ---

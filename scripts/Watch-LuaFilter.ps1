@@ -8,7 +8,7 @@ $ServiceName = "SentinelAgent"
 
 # --- Read config ---
 $ConfigPath = Join-Path $PSScriptRoot "..\config.yaml"
-$AgentPath  = "C:\APPS\Sentinel"
+$AgentPath  = "C:\ProgramData\SEIP"
 
 if (Test-Path $ConfigPath) {
     $cfg = Get-Content $ConfigPath -Raw

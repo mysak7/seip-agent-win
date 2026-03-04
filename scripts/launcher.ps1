@@ -4,17 +4,17 @@
 $ConfigPath = Join-Path $PSScriptRoot "..\config.yaml"
 if (-not (Test-Path $ConfigPath)) { 
     Write-Warning "Config file not found at $ConfigPath. Using defaults."
-    $AgentPath = "C:\APPS\Sentinel"
-    $ToolsPath = "C:\APPS\Sentinel\.tools"
+    $AgentPath = "C:\ProgramData\SEIP"
+    $ToolsPath = "C:\ProgramData\SEIP\.tools"
 } else {
     $ConfigContent = Get-Content $ConfigPath -Raw
     
-    $AgentPath = "C:\APPS\Sentinel"
+    $AgentPath = "C:\ProgramData\SEIP"
     if ($ConfigContent -match 'AgentPath:\s*"(.*)"') { $AgentPath = $matches[1] }
     elseif ($ConfigContent -match "AgentPath:\s*'(.*)'") { $AgentPath = $matches[1] }
     elseif ($ConfigContent -match 'AgentPath:\s*([^"\s]+)') { $AgentPath = $matches[1] }
     
-    $ToolsPath = "C:\APPS\Sentinel\.tools"
+    $ToolsPath = "C:\ProgramData\SEIP\.tools"
     if ($ConfigContent -match 'ToolsPath:\s*"(.*)"') { $ToolsPath = $matches[1] }
     elseif ($ConfigContent -match "ToolsPath:\s*'(.*)'") { $ToolsPath = $matches[1] }
     elseif ($ConfigContent -match 'ToolsPath:\s*([^"\s]+)') { $ToolsPath = $matches[1] }

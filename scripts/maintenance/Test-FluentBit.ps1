@@ -6,17 +6,17 @@
 $ConfigPath = Join-Path $PSScriptRoot "..\config.yaml"
 if (Test-Path $ConfigPath) {
     $ConfigContent = Get-Content $ConfigPath -Raw
-    $AgentPath = "C:\APPS\Sentinel"
+    $AgentPath = "C:\ProgramData\SEIP"
     if ($ConfigContent -match 'AgentPath:\s*"(.*)"') { $AgentPath = $matches[1] }
     elseif ($ConfigContent -match "AgentPath:\s*'(.*)'") { $AgentPath = $matches[1] }
     elseif ($ConfigContent -match 'AgentPath:\s*([^"\s]+)') { $AgentPath = $matches[1] }
-    $ToolsPath = "C:\APPS\Sentinel\.tools"
+    $ToolsPath = "C:\ProgramData\SEIP\.tools"
     if ($ConfigContent -match 'ToolsPath:\s*"(.*)"') { $ToolsPath = $matches[1] }
     elseif ($ConfigContent -match "ToolsPath:\s*'(.*)'") { $ToolsPath = $matches[1] }
     elseif ($ConfigContent -match 'ToolsPath:\s*([^"\s]+)') { $ToolsPath = $matches[1] }
 } else {
-    $AgentPath = "C:\APPS\Sentinel"
-    $ToolsPath  = "C:\APPS\Sentinel\.tools"
+    $AgentPath = "C:\ProgramData\SEIP"
+    $ToolsPath  = "C:\ProgramData\SEIP\.tools"
 }
 
 $TemplatePath    = Join-Path $PSScriptRoot "..\fluent-bit\agent-config-debug.tpl"

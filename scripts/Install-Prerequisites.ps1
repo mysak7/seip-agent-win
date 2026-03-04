@@ -10,7 +10,7 @@ $ConfigPath = Join-Path $PSScriptRoot "..\config.yaml"
 if (-not (Test-Path $ConfigPath)) { throw "Config file not found at $ConfigPath" }
 
 $ConfigContent = Get-Content $ConfigPath -Raw
-$InstallPath = "C:\APPS\Sentinel\.tools" # Default
+$InstallPath = "C:\ProgramData\SEIP\.tools" # Default
 if ($ConfigContent -match 'ToolsPath:\s*"(.*)"') { $InstallPath = $matches[1] }
 elseif ($ConfigContent -match "ToolsPath:\s*'(.*)'") { $InstallPath = $matches[1] }
 elseif ($ConfigContent -match 'ToolsPath:\s*([^"\s]+)') { $InstallPath = $matches[1] }
@@ -357,7 +357,7 @@ if (-not (Get-Command nssm -ErrorAction SilentlyContinue)) {
 # Accounts cannot access. The SCM calls CreateProcessAsUser() with the VSA token,
 # and Windows checks that the VSA can read the service binary — if not, StartService
 # fails with ERROR_ACCESS_DENIED (5). Copying nssm.exe to $InstallPath
-# (C:\APPS\Sentinel\.tools) which VSAs already have Full Control on fixes this.
+# (C:\ProgramData\SEIP\.tools) which VSAs already have Full Control on fixes this.
 $NssmCmd = Get-Command nssm -ErrorAction SilentlyContinue
 if ($NssmCmd) {
     $NssmDest = Join-Path $InstallPath "nssm.exe"

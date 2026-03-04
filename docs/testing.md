@@ -16,8 +16,8 @@
 
 This script:
 1. Reads paths from `config.yaml`
-2. Copies `fluent-bit\sysmon_security.lua` to `C:\APPS\Sentinel\`
-3. Generates `C:\APPS\Sentinel\fluent-bit-debug.conf` from `fluent-bit\agent-config-debug.tpl`
+2. Copies `fluent-bit\sysmon_security.lua` to `C:\ProgramData\SEIP\`
+3. Generates `C:\ProgramData\SEIP\fluent-bit-debug.conf` from `fluent-bit\agent-config-debug.tpl`
    (stdout output instead of Kafka, separate SQLite DB so it does not interfere with production)
 4. Starts Fluent Bit — filtered events stream to the console as JSON lines
 
@@ -72,7 +72,7 @@ Drop rate of ~75-85% is expected. If drop rate is 0%, the Lua script likely fail
 Inspect what config Fluent Bit actually received:
 
 ```powershell
-cat C:\APPS\Sentinel\fluent-bit-debug.conf
+cat C:\ProgramData\SEIP\fluent-bit-debug.conf
 ```
 
 Verify that `{{AGENT_PATH}}` was substituted with the real path and the `[FILTER]` block is present.
@@ -80,7 +80,7 @@ Verify that `{{AGENT_PATH}}` was substituted with the real path and the `[FILTER
 ### 4. Lua script deployed to agent path
 
 ```powershell
-cat C:\APPS\Sentinel\sysmon_security.lua
+cat C:\ProgramData\SEIP\sysmon_security.lua
 ```
 
 This is the copy the running Fluent Bit instance reads. It is overwritten on every test/service start
@@ -96,5 +96,5 @@ Stop the test script (Ctrl+C), then restart the service:
 nssm restart SentinelAgent
 ```
 
-The service runs `launcher.ps1`, which regenerates `C:\APPS\Sentinel\fluent-bit.conf`
+The service runs `launcher.ps1`, which regenerates `C:\ProgramData\SEIP\fluent-bit.conf`
 with real Kafka credentials and starts Fluent Bit against that config.

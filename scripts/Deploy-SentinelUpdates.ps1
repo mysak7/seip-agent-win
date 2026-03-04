@@ -21,7 +21,7 @@ $ErrorActionPreference = "Stop"
 $RepoRoot   = Resolve-Path (Join-Path $PSScriptRoot "..")
 $ConfigPath = Join-Path $RepoRoot "config.yaml"
 
-$AgentPath = "C:\APPS\Sentinel"
+$AgentPath = "C:\ProgramData\SEIP"
 if (Test-Path $ConfigPath) {
     $cfg = Get-Content $ConfigPath -Raw
     if    ($cfg -match 'AgentPath:\s*"(.*)"')        { $AgentPath = $matches[1] }
