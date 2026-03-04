@@ -234,7 +234,7 @@ Both services should show `Running` / `Automatic`.
 Watcher log (poll results, download events, restarts):
 
 ```powershell
-Get-Content "C:\APPS\Sentinel\logs\lua-watcher.log" -Tail 30 -Wait
+Get-Content "C:\ProgramData\SEIP\logs\lua-watcher.log" -Tail 30 -Wait
 ```
 
 ### How the watcher works
@@ -244,12 +244,12 @@ every LuaWatcherInterval seconds (default: 300 s)
   │
   ├─ GET noise_filter.meta  ──► parse { ts, archive_key }
   │
-  ├─ compare ts  vs  C:\APPS\Sentinel\lua_filter.state
+  ├─ compare ts  vs  C:\ProgramData\SEIP\lua_filter.state
   │
   ├─ [no change] → log "up-to-date", sleep
   │
   └─ [new ts] → download noise_filter.lua
-               → overwrite C:\APPS\Sentinel\llm_filter.lua
+               → overwrite C:\ProgramData\SEIP\llm_filter.lua
                → save new ts to lua_filter.state
                → Restart-Service SentinelAgent
 ```

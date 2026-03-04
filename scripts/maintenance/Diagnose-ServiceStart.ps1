@@ -25,10 +25,10 @@ foreach ($svcName in @("SentinelAgent", "SentinelLuaWatcher")) {
 
 Write-Host "`n══ NSSM service logs ══════════════════════════════════" -ForegroundColor Cyan
 foreach ($log in @(
-    "C:\APPS\Sentinel\logs\service-error.log",
-    "C:\APPS\Sentinel\logs\service.log",
-    "C:\APPS\Sentinel\logs\lua-watcher-svc-error.log",
-    "C:\APPS\Sentinel\logs\lua-watcher-svc.log"
+    "C:\ProgramData\SEIP\logs\service-error.log",
+    "C:\ProgramData\SEIP\logs\service.log",
+    "C:\ProgramData\SEIP\logs\lua-watcher-svc-error.log",
+    "C:\ProgramData\SEIP\logs\lua-watcher-svc.log"
 )) {
     if (Test-Path $log) {
         Write-Host "`n-- $log (last 30 lines) --" -ForegroundColor Yellow

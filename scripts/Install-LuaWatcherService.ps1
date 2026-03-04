@@ -17,7 +17,7 @@ $ConfigPath = Join-Path $PSScriptRoot "..\config.yaml"
 if (-not (Test-Path $ConfigPath)) { throw "Config file not found at $ConfigPath" }
 
 $cfg       = Get-Content $ConfigPath -Raw
-$AgentPath = "C:\APPS\Sentinel"
+$AgentPath = "C:\ProgramData\SEIP"
 if ($cfg -match 'AgentPath:\s*"(.*)"')        { $AgentPath = $matches[1] }
 elseif ($cfg -match "AgentPath:\s*'(.*)'")    { $AgentPath = $matches[1] }
 elseif ($cfg -match 'AgentPath:\s*([^"\s]+)') { $AgentPath = $matches[1] }

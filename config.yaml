@@ -1,3 +1,3 @@
-AgentPath: "C:\APPS\Sentinel"
-ToolsPath: "C:\APPS\Sentinel\.tools"
+AgentPath: "C:\ProgramData\SEIP"
+ToolsPath: "C:\ProgramData\SEIP\.tools"
 LuaWatcherSchedule: "*/5 * * * *"  # every 5 min, aligned to :07/:12/:17/... (minute % 5 == 2)

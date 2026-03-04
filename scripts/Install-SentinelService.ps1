@@ -13,7 +13,7 @@ $ConfigPath = Join-Path $PSScriptRoot "..\config.yaml"
 if (-not (Test-Path $ConfigPath)) { throw "Config file not found at $ConfigPath" }
 
 $cfg       = Get-Content $ConfigPath -Raw
-$AgentPath = "C:\APPS\Sentinel"
+$AgentPath = "C:\ProgramData\SEIP"
 if ($cfg -match 'AgentPath:\s*"(.*)"')        { $AgentPath = $matches[1] }
 elseif ($cfg -match "AgentPath:\s*'(.*)'")    { $AgentPath = $matches[1] }
 elseif ($cfg -match 'AgentPath:\s*([^"\s]+)') { $AgentPath = $matches[1] }
@@ -47,7 +47,7 @@ foreach ($dir in @($AgentPath, $LogDir)) {
 # --- Deploy launcher and Fluent Bit assets to $AgentPath ---
 # Running scripts from C:\Users\...\Documents\... while executing as a privileged VSA
 # is a Local Privilege Escalation vector: any process running as the installing user
-# can modify the script. $AgentPath (C:\APPS\Sentinel) is admin-only writable.
+# can modify the script. $AgentPath (C:\ProgramData\SEIP) is admin-only writable.
 Write-Host "Deploying launcher and config assets to $AgentPath..."
 $FluentBitSrcDir = Join-Path $PSScriptRoot "..\fluent-bit"
 Copy-Item -Path $LauncherScript -Destination (Join-Path $AgentPath "launcher.ps1") -Force
@@ -173,7 +173,7 @@ Write-Host "  Restart: nssm restart $ServiceName"
 Write-Host "  Remove:  nssm remove $ServiceName confirm"
 
 # Service configuration succeeded. If the service is not Running, it is a runtime issue
-# (e.g. missing credentials) — check C:\APPS\Sentinel\logs\service-error.log.
+# (e.g. missing credentials) — check C:\ProgramData\SEIP\logs\service-error.log.
 # Exit 0 so that callers (e.g. Setup-Sentinel.ps1) do not treat a startup failure as an
 # install failure; nssm start's non-zero exit code must not bleed into $LASTEXITCODE.
 exit 0
