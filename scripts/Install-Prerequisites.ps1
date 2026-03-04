@@ -99,7 +99,29 @@ $UseNative = $false
 
 if ($OsBuild -ge 26100) {
     $NativeFeature = Get-WindowsOptionalFeature -Online -FeatureName "Sysmon" -ErrorAction SilentlyContinue
-    if ($NativeFeature) {
+    if (-not $NativeFeature -and (Test-Path "$env:SystemRoot\Sysmon.exe")) {
+        # Binary present but optional feature not registered (e.g. pre-release build) — treat as native
+        $UseNative = $true
+        Write-Host "  Native Sysmon binary found at $env:SystemRoot\Sysmon.exe (build $OsBuild)." -ForegroundColor Cyan
+
+        $SysmonSvc = Get-Service -Name "Sysmon" -ErrorAction SilentlyContinue
+        if (-not $SysmonSvc) { $SysmonSvc = Get-Service -Name "Sysmon64" -ErrorAction SilentlyContinue }
+        if (-not $SysmonSvc) {
+            Write-Host "  Installing Sysmon service..."
+            $installArgs = if (Test-Path $SysmonConfig) { "-accepteula -i `"$SysmonConfig`"" } else { "-accepteula -i" }
+            $p = Start-Process -FilePath "$env:SystemRoot\Sysmon.exe" -ArgumentList $installArgs -Wait -NoNewWindow -PassThru
+            if ($p.ExitCode -ne 0) { Write-Warning "  sysmon -i exited with code $($p.ExitCode)." }
+            else { Write-Host "  OK Sysmon service installed" -ForegroundColor Green }
+        } else {
+            if ($SysmonSvc.Status -ne 'Running') { Start-Service $SysmonSvc.Name }
+            if (Test-Path $SysmonConfig) {
+                Start-Process -FilePath "$env:SystemRoot\Sysmon.exe" -ArgumentList "-c `"$SysmonConfig`"" -Wait -NoNewWindow | Out-Null
+                Write-Host "  OK Sysmon config updated" -ForegroundColor Green
+            } else {
+                Write-Host "  OK Sysmon already running (no config change)" -ForegroundColor Green
+            }
+        }
+    } elseif ($NativeFeature) {
         $UseNative = $true
         Write-Host "  Native Sysmon optional feature detected (build $OsBuild)." -ForegroundColor Cyan
 
