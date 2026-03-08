@@ -33,8 +33,75 @@ $RepoLuaPath       = Join-Path $_repoFbDir "sysmon_security.lua"
 $LocalPackLuaPath  = Join-Path $AgentPath "sysmon_pack.lua"
 $RepoPackLuaPath   = Join-Path $_repoFbDir "sysmon_pack.lua"
 $LocalLlmLuaPath    = Join-Path $AgentPath "llm_filter.lua"
-$LlmLuaUrl          = "https://mysak7-seip-lua.s3.eu-central-1.amazonaws.com/noise_filter.lua"
+$LocalAlertLuaPath  = Join-Path $AgentPath "alert_filter.lua"
+$BundleUrl          = "https://mysak7-seip-lua.s3.eu-central-1.amazonaws.com/bundle/manifest.json"
 $FluentBitExe       = Join-Path $ToolsPath "fluent-bit\bin\fluent-bit.exe"
+
+# RSA-4096 SubjectPublicKeyInfo (DER, base64) — KMS alias: dev-seip-lua-signing
+$LuaPublicKeyB64 = @"
+MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAq2patvrcDkKx62yMFhYI
+WBLFuDu84yw3XJyvlfCwKFtoLEYgYSICMbNbjoT8U6I4dHMWiGPQKsGCJjGT3Ovq
+aFMPGWEjxWr6yMTtO731gha27ODlUehQeBec2n17gwjL5oW5GCGZGwQkvv62Q5Xe
+cQNqW1V3n43RUXMIskxp6GwoFGaDZUCY2YuLtWs0Nh2mkTKVDexO9wCcbPnN9oEM
+iIu6jhoVJr2ogTV71Q+BbGsvNfDU4lbk+s6e/N4iewCsUBJG29+9lR7a7c9cAPzw
+TURlX+SSMJFXSEl3aQfxvHOTUNo73OF6jwfBw+hoOolucDotewZOs21L4KylUQad
+0LKV/RsXdJBZaYViSdlmdmAUyP/rv4xDHWR5LFuJH7rKcAd9JNR4iXzGHdp9gAMt
+nA2xsISB3DLYUrv2HpEcZS4bDr94WOh5ELhhFKGIMaVwAgoat0GSrgNnEZnyA83o
+RMb4GTpxMwNomDH4OAc4firtr5V+Motz3ez+4upraBE/2b2a6Iwuwvq+d2IfPDUW
+NqccOeKwlWcGtYSXPOZwVhJ/xRXbaXnaylCP+sZ72y0I0WW+7ltChKdkpyt7F7tt
+Oumwwq0qQKRevQIdYHNTK9IjkPzLb4lxNimPPdNQFpOEcd+gPxGB9iy0sd6DHsxj
+JAdET6rKkCvB1PbXrK+kxekCAwEAAQ==
+"@
+
+function _Read-DerLength {
+    param([byte[]]$b, [ref]$idx)
+    $first = $b[$idx.Value]; $idx.Value++
+    if ($first -lt 0x80) { return [int]$first }
+    $n = $first -band 0x7F; $len = 0
+    for ($k = 0; $k -lt $n; $k++) { $len = ($len -shl 8) -bor $b[$idx.Value]; $idx.Value++ }
+    return $len
+}
+
+function _New-RSAFromSpki {
+    param([string]$Base64Spki)
+    $der = [Convert]::FromBase64String(($Base64Spki -replace '\s+', ''))
+    try {
+        $rsa = [System.Security.Cryptography.RSA]::Create()
+        $read = 0; $rsa.ImportSubjectPublicKeyInfo([byte[]]$der, [ref]$read); return $rsa
+    } catch { }
+    $i = [ref]0
+    $der[$i.Value++] | Out-Null                          # outer SEQUENCE tag
+    _Read-DerLength $der $i | Out-Null
+    $der[$i.Value++] | Out-Null                          # AlgorithmIdentifier tag
+    $i.Value += _Read-DerLength $der $i                  # skip AlgorithmIdentifier
+    $der[$i.Value++] | Out-Null                          # BIT STRING tag
+    _Read-DerLength $der $i | Out-Null; $i.Value++       # BIT STRING length + unused bits
+    $der[$i.Value++] | Out-Null                          # RSAPublicKey SEQUENCE tag
+    _Read-DerLength $der $i | Out-Null
+    $der[$i.Value++] | Out-Null; $nLen = _Read-DerLength $der $i  # modulus tag + length
+    $nBytes = $der[$i.Value..($i.Value + $nLen - 1)]; $i.Value += $nLen
+    $der[$i.Value++] | Out-Null; $eLen = _Read-DerLength $der $i  # exponent tag + length
+    $eBytes = $der[$i.Value..($i.Value + $eLen - 1)]
+    while ($nBytes.Length -gt 1 -and $nBytes[0] -eq 0x00) { $nBytes = $nBytes[1..($nBytes.Length-1)] }
+    while ($eBytes.Length -gt 1 -and $eBytes[0] -eq 0x00) { $eBytes = $eBytes[1..($eBytes.Length-1)] }
+    $p = New-Object System.Security.Cryptography.RSAParameters
+    $p.Modulus = [byte[]]$nBytes; $p.Exponent = [byte[]]$eBytes
+    $rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider
+    $rsa.ImportParameters($p); return $rsa
+}
+
+function _Test-BundleSignature {
+    param([PSCustomObject]$Bundle)
+    $ordered = [ordered]@{ generated_at=$Bundle.generated_at; noise_filter=$Bundle.noise_filter; alert_filter=$Bundle.alert_filter }
+    $canonical = ($ordered | ConvertTo-Json -Compress -Depth 10) -replace '\\u003c','<' -replace '\\u003e','>' -replace '\\u0026','&'
+    $rsa = _New-RSAFromSpki -Base64Spki $LuaPublicKeyB64
+    try {
+        return $rsa.VerifyData([System.Text.Encoding]::UTF8.GetBytes($canonical),
+            [Convert]::FromBase64String($Bundle.signature),
+            [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+            [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+    } finally { $rsa.Dispose() }
+}
 
 # --- Pre-flight Checks ---
 # Check if Sysmon is available (Required for agent-config.tpl)
@@ -119,9 +186,15 @@ if (Test-Path $RepoPackLuaPath) {
     Write-Warning "Lua pack script not found at $RepoPackLuaPath - payload compaction will be disabled."
 }
 try {
-    Invoke-WebRequest -Uri $LlmLuaUrl -OutFile $LocalLlmLuaPath -UseBasicParsing
+    $bundleJson   = Invoke-WebRequest -Uri $BundleUrl -UseBasicParsing -TimeoutSec 15 | Select-Object -ExpandProperty Content
+    $bundleObj    = $bundleJson | ConvertFrom-Json
+    $sigValid     = _Test-BundleSignature -Bundle $bundleObj
+    if (-not $sigValid) { throw "Bundle signature verification FAILED — filters NOT written." }
+    [IO.File]::WriteAllText($LocalLlmLuaPath,   $bundleObj.noise_filter, [System.Text.Encoding]::UTF8)
+    [IO.File]::WriteAllText($LocalAlertLuaPath, $bundleObj.alert_filter, [System.Text.Encoding]::UTF8)
+    Write-Host "Lua filters loaded and verified from signed bundle (ts=$($bundleObj.generated_at))." -ForegroundColor Green
 } catch {
-    Write-Warning "Failed to download LLM noise filter from $LlmLuaUrl - LLM noise filtering will be disabled."
+    Write-Warning "Failed to download/verify Lua filter bundle: $_ — LLM filtering will use last cached files."
 }
 
 # 6. Saving final config (only for this run)
