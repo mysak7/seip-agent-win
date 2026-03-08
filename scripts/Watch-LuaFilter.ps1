@@ -8,6 +8,7 @@ $ServiceName = "SentinelAgent"
 
 # RSA-4096 SubjectPublicKeyInfo (DER, base64) — KMS alias: dev-seip-lua-signing
 # Rotate this value if the KMS key is rotated.
+# This default is overridden by LUA_PUBLIC_KEY_B64 in ..\.env (written by Terraform).
 $LuaPublicKeyB64 = @"
 MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAq2patvrcDkKx62yMFhYI
 WBLFuDu84yw3XJyvlfCwKFtoLEYgYSICMbNbjoT8U6I4dHMWiGPQKsGCJjGT3Ovq
@@ -22,6 +23,17 @@ NqccOeKwlWcGtYSXPOZwVhJ/xRXbaXnaylCP+sZ72y0I0WW+7ltChKdkpyt7F7tt
 Oumwwq0qQKRevQIdYHNTK9IjkPzLb4lxNimPPdNQFpOEcd+gPxGB9iy0sd6DHsxj
 JAdET6rKkCvB1PbXrK+kxekCAwEAAQ==
 "@
+
+# Override public key from ..\.env if present (written by `terraform apply`)
+$EnvFilePath = Join-Path $PSScriptRoot "..\.env"
+if (Test-Path $EnvFilePath) {
+    foreach ($line in (Get-Content $EnvFilePath)) {
+        if ($line -match '^LUA_PUBLIC_KEY_B64=(.+)$') {
+            $LuaPublicKeyB64 = $matches[1]
+            break
+        }
+    }
+}
 
 # --- Read config ---
 $ConfigPath = Join-Path $PSScriptRoot "..\config.yaml"
@@ -128,7 +140,7 @@ function Test-BundleSignature {
     $ordered = [ordered]@{
         generated_at = $Bundle.generated_at
         noise_filter = $Bundle.noise_filter
-        alert_filter = $Bundle.alert_filter
+        user_filter  = $Bundle.user_filter
     }
     $canonical = $ordered | ConvertTo-Json -Compress -Depth 10
     # PowerShell 7 / System.Text.Json escapes <, >, & as \uXXXX — undo to match Python output
@@ -185,7 +197,7 @@ while ($true) {
 
             # 4. Write both Lua filters atomically
             [IO.File]::WriteAllText($LocalNoiseLuaPath,  $bundle.noise_filter, [System.Text.Encoding]::UTF8)
-            [IO.File]::WriteAllText($LocalAlertLuaPath, $bundle.alert_filter,  [System.Text.Encoding]::UTF8)
+            [IO.File]::WriteAllText($LocalAlertLuaPath, $bundle.user_filter,   [System.Text.Encoding]::UTF8)
             Write-Log "Written: llm_filter.lua + alert_filter.lua"
 
             # 5. Persist new timestamp
