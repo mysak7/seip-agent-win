@@ -1,25 +1,24 @@
 # --- Sentinel Agent Launcher ---
 
 # Read Config from YAML (Simple Parse)
+$AgentPath = "C:\ProgramData\SEIP"
+$ToolsPath = "C:\ProgramData\SEIP\.tools"
+$AllowStartWithoutLatestFilters = $true
+
 $ConfigPath = Join-Path $PSScriptRoot "..\config.yaml"
-if (-not (Test-Path $ConfigPath)) { 
+if (-not (Test-Path $ConfigPath)) {
     Write-Warning "Config file not found at $ConfigPath. Using defaults."
-    $AgentPath = "C:\ProgramData\SEIP"
-    $ToolsPath = "C:\ProgramData\SEIP\.tools"
 } else {
     $ConfigContent = Get-Content $ConfigPath -Raw
-    
-    $AgentPath = "C:\ProgramData\SEIP"
+
     if ($ConfigContent -match 'AgentPath:\s*"(.*)"') { $AgentPath = $matches[1] }
     elseif ($ConfigContent -match "AgentPath:\s*'(.*)'") { $AgentPath = $matches[1] }
     elseif ($ConfigContent -match 'AgentPath:\s*([^"\s]+)') { $AgentPath = $matches[1] }
-    
-    $ToolsPath = "C:\ProgramData\SEIP\.tools"
+
     if ($ConfigContent -match 'ToolsPath:\s*"(.*)"') { $ToolsPath = $matches[1] }
     elseif ($ConfigContent -match "ToolsPath:\s*'(.*)'") { $ToolsPath = $matches[1] }
     elseif ($ConfigContent -match 'ToolsPath:\s*([^"\s]+)') { $ToolsPath = $matches[1] }
 
-    $AllowStartWithoutLatestFilters = $true
     if ($ConfigContent -match 'AllowStartWithoutLatestFilters:\s*(true|false)') {
         $AllowStartWithoutLatestFilters = ($matches[1] -eq 'true')
     }
@@ -79,7 +78,7 @@ function _New-RSAFromSpki {
     # PROV_RSA_AES (type 24) supports 4096-bit keys on .NET Framework; NoPrompt for non-interactive use
     $csp = New-Object System.Security.Cryptography.CspParameters(24)
     $csp.Flags = [System.Security.Cryptography.CspProviderFlags]::NoPrompt
-    $rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider($nBytes.Length * 8, $csp)
+    $rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider(([int]$nBytes.Count * 8), $csp)
     $rsa.PersistKeyInCsp = $false
     $rsa.ImportParameters($p); return $rsa
 }
@@ -190,16 +189,16 @@ try {
     $bundleJson   = Invoke-WebRequest -Uri $BundleUrl -UseBasicParsing -TimeoutSec 15 | Select-Object -ExpandProperty Content
     $bundleObj    = $bundleJson | ConvertFrom-Json
     $sigValid     = _Test-BundleSignature -Bundle $bundleObj
-    if (-not $sigValid) { throw "Bundle signature verification FAILED — filters NOT written." }
+    if (-not $sigValid) { throw "Bundle signature verification FAILED - filters NOT written." }
     [IO.File]::WriteAllText($LocalLlmLuaPath,   $bundleObj.noise_filter, [System.Text.Encoding]::UTF8)
     [IO.File]::WriteAllText($LocalAlertLuaPath, $bundleObj.user_filter, [System.Text.Encoding]::UTF8)
     Write-Host "Lua filters loaded and verified from signed bundle (ts=$($bundleObj.generated_at))." -ForegroundColor Green
 } catch {
     if (-not $AllowStartWithoutLatestFilters) {
-        Write-Error "Failed to download/verify Lua filter bundle: $_ — LLM filtering cannot fall back to cached files (AllowStartWithoutLatestFilters=false)."
+        Write-Error "Failed to download/verify Lua filter bundle: $_ - LLM filtering cannot fall back to cached files (AllowStartWithoutLatestFilters=false)."
         exit 1
     }
-    Write-Warning "Failed to download/verify Lua filter bundle: $_ — LLM filtering will use last cached files."
+    Write-Warning "Failed to download/verify Lua filter bundle: $_ - LLM filtering will use last cached files."
 }
 
 # 6. Saving final config (only for this run)
