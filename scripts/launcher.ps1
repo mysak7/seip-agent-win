@@ -142,8 +142,12 @@ try {
         }
     }
 
-    if (-not $KafkaUser -or -not $KafkaPass -or -not $BrokerUrl) {
-        throw "Credentials could not be loaded from Environment Variables or .env file."
+    $missing = @()
+    if (-not $KafkaUser) { $missing += "PRODUCER_API_KEY" }
+    if (-not $KafkaPass) { $missing += "PRODUCER_API_SECRET" }
+    if (-not $BrokerUrl) { $missing += "BOOTSTRAP_SERVER" }
+    if ($missing.Count -gt 0) {
+        throw "Missing credentials: $($missing -join ', '). Set them as environment variables or add to .env file."
     }
 
     Write-Host "Credentials successfully loaded." -ForegroundColor Green
