@@ -18,6 +18,11 @@ if (-not (Test-Path $ConfigPath)) {
     if ($ConfigContent -match 'ToolsPath:\s*"(.*)"') { $ToolsPath = $matches[1] }
     elseif ($ConfigContent -match "ToolsPath:\s*'(.*)'") { $ToolsPath = $matches[1] }
     elseif ($ConfigContent -match 'ToolsPath:\s*([^"\s]+)') { $ToolsPath = $matches[1] }
+
+    $AllowStartWithoutLatestFilters = $true
+    if ($ConfigContent -match 'AllowStartWithoutLatestFilters:\s*(true|false)') {
+        $AllowStartWithoutLatestFilters = ($matches[1] -eq 'true')
+    }
 }
 
 # 1. Define paths
@@ -37,21 +42,6 @@ $LocalAlertLuaPath  = Join-Path $AgentPath "alert_filter.lua"
 $BundleUrl          = "https://mysak7-seip-lua.s3.eu-central-1.amazonaws.com/bundle/manifest.json"
 $FluentBitExe       = Join-Path $ToolsPath "fluent-bit\bin\fluent-bit.exe"
 
-# RSA-4096 SubjectPublicKeyInfo (DER, base64) — KMS alias: dev-seip-lua-signing
-$LuaPublicKeyB64 = @"
-MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAq2patvrcDkKx62yMFhYI
-WBLFuDu84yw3XJyvlfCwKFtoLEYgYSICMbNbjoT8U6I4dHMWiGPQKsGCJjGT3Ovq
-aFMPGWEjxWr6yMTtO731gha27ODlUehQeBec2n17gwjL5oW5GCGZGwQkvv62Q5Xe
-cQNqW1V3n43RUXMIskxp6GwoFGaDZUCY2YuLtWs0Nh2mkTKVDexO9wCcbPnN9oEM
-iIu6jhoVJr2ogTV71Q+BbGsvNfDU4lbk+s6e/N4iewCsUBJG29+9lR7a7c9cAPzw
-TURlX+SSMJFXSEl3aQfxvHOTUNo73OF6jwfBw+hoOolucDotewZOs21L4KylUQad
-0LKV/RsXdJBZaYViSdlmdmAUyP/rv4xDHWR5LFuJH7rKcAd9JNR4iXzGHdp9gAMt
-nA2xsISB3DLYUrv2HpEcZS4bDr94WOh5ELhhFKGIMaVwAgoat0GSrgNnEZnyA83o
-RMb4GTpxMwNomDH4OAc4firtr5V+Motz3ez+4upraBE/2b2a6Iwuwvq+d2IfPDUW
-NqccOeKwlWcGtYSXPOZwVhJ/xRXbaXnaylCP+sZ72y0I0WW+7ltChKdkpyt7F7tt
-Oumwwq0qQKRevQIdYHNTK9IjkPzLb4lxNimPPdNQFpOEcd+gPxGB9iy0sd6DHsxj
-JAdET6rKkCvB1PbXrK+kxekCAwEAAQ==
-"@
 
 function _Read-DerLength {
     param([byte[]]$b, [ref]$idx)
@@ -86,13 +76,17 @@ function _New-RSAFromSpki {
     while ($eBytes.Length -gt 1 -and $eBytes[0] -eq 0x00) { $eBytes = $eBytes[1..($eBytes.Length-1)] }
     $p = New-Object System.Security.Cryptography.RSAParameters
     $p.Modulus = [byte[]]$nBytes; $p.Exponent = [byte[]]$eBytes
-    $rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider
+    # PROV_RSA_AES (type 24) supports 4096-bit keys on .NET Framework; NoPrompt for non-interactive use
+    $csp = New-Object System.Security.Cryptography.CspParameters(24)
+    $csp.Flags = [System.Security.Cryptography.CspProviderFlags]::NoPrompt
+    $rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider($nBytes.Length * 8, $csp)
+    $rsa.PersistKeyInCsp = $false
     $rsa.ImportParameters($p); return $rsa
 }
 
 function _Test-BundleSignature {
     param([PSCustomObject]$Bundle)
-    $ordered = [ordered]@{ generated_at=$Bundle.generated_at; noise_filter=$Bundle.noise_filter; alert_filter=$Bundle.alert_filter }
+    $ordered = [ordered]@{ generated_at=$Bundle.generated_at; noise_filter=$Bundle.noise_filter; user_filter=$Bundle.user_filter }
     $canonical = ($ordered | ConvertTo-Json -Compress -Depth 10) -replace '\\u003c','<' -replace '\\u003e','>' -replace '\\u0026','&'
     $rsa = _New-RSAFromSpki -Base64Spki $LuaPublicKeyB64
     try {
@@ -125,7 +119,8 @@ try {
     $KafkaPass = $env:PRODUCER_API_SECRET
     $BrokerUrl = $env:BOOTSTRAP_SERVER
 
-    if (-not $KafkaUser -or -not $KafkaPass -or -not $BrokerUrl) {
+    $LuaPublicKeyB64 = $env:LUA_PUBLIC_KEY_B64
+    if (-not $KafkaUser -or -not $KafkaPass -or -not $BrokerUrl -or -not $LuaPublicKeyB64) {
         # Fallback to .env file. Check two locations:
         #   1. Repo root  — works when running manually as an interactive user
         #   2. $AgentPath — works when running as NT SERVICE\SentinelAgent (VSA has Full Control
@@ -138,6 +133,7 @@ try {
                 if ($line -match "^PRODUCER_API_KEY=(.*)") { $KafkaUser = $matches[1].Trim() }
                 if ($line -match "^PRODUCER_API_SECRET=(.*)") { $KafkaPass = $matches[1].Trim() }
                 if ($line -match "^BOOTSTRAP_SERVER=(.*)") { $BrokerUrl = $matches[1].Trim() }
+                if ($line -match "^LUA_PUBLIC_KEY_B64=(.*)") { $LuaPublicKeyB64 = $matches[1].Trim() }
             }
         }
     }
@@ -146,6 +142,7 @@ try {
     if (-not $KafkaUser) { $missing += "PRODUCER_API_KEY" }
     if (-not $KafkaPass) { $missing += "PRODUCER_API_SECRET" }
     if (-not $BrokerUrl) { $missing += "BOOTSTRAP_SERVER" }
+    if (-not $LuaPublicKeyB64) { $missing += "LUA_PUBLIC_KEY_B64" }
     if ($missing.Count -gt 0) {
         throw "Missing credentials: $($missing -join ', '). Set them as environment variables or add to .env file."
     }
@@ -195,9 +192,13 @@ try {
     $sigValid     = _Test-BundleSignature -Bundle $bundleObj
     if (-not $sigValid) { throw "Bundle signature verification FAILED — filters NOT written." }
     [IO.File]::WriteAllText($LocalLlmLuaPath,   $bundleObj.noise_filter, [System.Text.Encoding]::UTF8)
-    [IO.File]::WriteAllText($LocalAlertLuaPath, $bundleObj.alert_filter, [System.Text.Encoding]::UTF8)
+    [IO.File]::WriteAllText($LocalAlertLuaPath, $bundleObj.user_filter, [System.Text.Encoding]::UTF8)
     Write-Host "Lua filters loaded and verified from signed bundle (ts=$($bundleObj.generated_at))." -ForegroundColor Green
 } catch {
+    if (-not $AllowStartWithoutLatestFilters) {
+        Write-Error "Failed to download/verify Lua filter bundle: $_ — LLM filtering cannot fall back to cached files (AllowStartWithoutLatestFilters=false)."
+        exit 1
+    }
     Write-Warning "Failed to download/verify Lua filter bundle: $_ — LLM filtering will use last cached files."
 }
 
