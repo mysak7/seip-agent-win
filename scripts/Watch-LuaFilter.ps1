@@ -124,7 +124,13 @@ function New-RSAFromSpki {
     $params = New-Object System.Security.Cryptography.RSAParameters
     $params.Modulus  = [byte[]]$nBytes
     $params.Exponent = [byte[]]$eBytes
-    $rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider
+    # PROV_RSA_AES (type 24) supports 4096-bit keys on .NET Framework.
+    # NoPrompt + PersistKeyInCsp=false: required for Virtual Service Accounts
+    # (no user profile loaded — avoids CSP key-container store access failure).
+    $csp = New-Object System.Security.Cryptography.CspParameters(24)
+    $csp.Flags = [System.Security.Cryptography.CspProviderFlags]::NoPrompt
+    $rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider(([int]$nBytes.Count * 8), $csp)
+    $rsa.PersistKeyInCsp = $false
     $rsa.ImportParameters($params)
     return $rsa
 }
