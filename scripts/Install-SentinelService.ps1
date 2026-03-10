@@ -19,7 +19,7 @@ elseif ($cfg -match "AgentPath:\s*'(.*)'")    { $AgentPath = $matches[1] }
 elseif ($cfg -match 'AgentPath:\s*([^"\s]+)') { $AgentPath = $matches[1] }
 
 # Use the NSSM copy from the tools directory if present.
-# winget installs NSSM to C:\Users\...\AppData — NT SERVICE\* VSAs cannot execute it
+# winget installs NSSM to C:\Users\...\AppData  -  NT SERVICE\* VSAs cannot execute it
 # (CreateProcessAsUser checks the binary is readable by the target user token).
 # Prepend the tools path so 'nssm install' registers a VSA-accessible binary path.
 $ToolsNssm = Join-Path $AgentPath ".tools\nssm.exe"
@@ -51,6 +51,13 @@ foreach ($dir in @($AgentPath, $LogDir)) {
 Write-Host "Deploying launcher and config assets to $AgentPath..."
 $FluentBitSrcDir = Join-Path $PSScriptRoot "..\fluent-bit"
 Copy-Item -Path $LauncherScript -Destination (Join-Path $AgentPath "launcher.ps1") -Force
+$FetchScript = Join-Path $PSScriptRoot "fetch_lua_filters.py"
+if (Test-Path $FetchScript) {
+    Copy-Item -Path $FetchScript -Destination (Join-Path $AgentPath "fetch_lua_filters.py") -Force
+    Write-Host "  Deployed fetch_lua_filters.py" -ForegroundColor DarkGray
+} else {
+    Write-Warning "  fetch_lua_filters.py not found at $FetchScript  -  Lua filter bundle fetch will fail at runtime."
+}
 foreach ($asset in @("agent-config.tpl", "sysmon_security.lua", "sysmon_pack.lua")) {
     $src = Join-Path $FluentBitSrcDir $asset
     if (Test-Path $src) {
@@ -71,7 +78,7 @@ nssm set $ServiceName Start        SERVICE_AUTO_START
 
 # ── Least-privilege: run under Virtual Service Account ────────────────────────
 # IMPORTANT: Do NOT use `nssm set ObjectName` for Virtual Service Accounts.
-# NSSM calls LogonUser() which requires a password — VSAs have none, so it
+# NSSM calls LogonUser() which requires a password  -  VSAs have none, so it
 # returns Access Denied when SCM tries to start the service.
 # Use sc.exe config instead; SCM handles VSAs natively (no password needed).
 Write-Host "Configuring Virtual Service Account (NT SERVICE\$ServiceName) via sc.exe..."
@@ -84,7 +91,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 $startName = (& sc.exe qc $ServiceName | Select-String "SERVICE_START_NAME").ToString().Trim()
 if ($startName -notmatch [regex]::Escape("NT SERVICE\$ServiceName")) {
-    Write-Error "VSA not applied — sc.exe qc reports: $startName"
+    Write-Error "VSA not applied  -  sc.exe qc reports: $startName"
     exit 1
 }
 Write-Host "  Verified: $startName" -ForegroundColor Green
@@ -137,7 +144,7 @@ try {
     Write-Host "  Done." -ForegroundColor Green
 } catch {
     if ($_.Exception.Message -match "already a member") {
-        Write-Host "  Already a member — skipping." -ForegroundColor Yellow
+        Write-Host "  Already a member  -  skipping." -ForegroundColor Yellow
     } else {
         Write-Warning "Could not add to Event Log Readers: $_"
     }
@@ -152,7 +159,7 @@ if (Test-Path $RepoEnv) {
     Copy-Item -Path $RepoEnv -Destination $AgentEnv -Force
     Write-Host "Copied .env to $AgentEnv (readable by NT SERVICE\$ServiceName)."
 } else {
-    Write-Warning ".env not found at $RepoEnv — service will fail to load credentials."
+    Write-Warning ".env not found at $RepoEnv  -  service will fail to load credentials."
     Write-Warning "Create .env in the repo root with PRODUCER_API_KEY, PRODUCER_API_SECRET, BOOTSTRAP_SERVER."
 }
 
@@ -173,7 +180,7 @@ Write-Host "  Restart: nssm restart $ServiceName"
 Write-Host "  Remove:  nssm remove $ServiceName confirm"
 
 # Service configuration succeeded. If the service is not Running, it is a runtime issue
-# (e.g. missing credentials) — check C:\ProgramData\SEIP\logs\service-error.log.
+# (e.g. missing credentials)  -  check C:\ProgramData\SEIP\logs\service-error.log.
 # Exit 0 so that callers (e.g. Setup-Sentinel.ps1) do not treat a startup failure as an
 # install failure; nssm start's non-zero exit code must not bleed into $LASTEXITCODE.
 exit 0

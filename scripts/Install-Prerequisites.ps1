@@ -100,7 +100,7 @@ $UseNative = $false
 if ($OsBuild -ge 26100) {
     $NativeFeature = Get-WindowsOptionalFeature -Online -FeatureName "Sysmon" -ErrorAction SilentlyContinue
     if (-not $NativeFeature -and (Test-Path "$env:SystemRoot\Sysmon.exe")) {
-        # Binary present but optional feature not registered (e.g. pre-release build) — treat as native
+        # Binary present but optional feature not registered (e.g. pre-release build)  -  treat as native
         $UseNative = $true
         Write-Host "  Native Sysmon binary found at $env:SystemRoot\Sysmon.exe (build $OsBuild)." -ForegroundColor Cyan
 
@@ -377,7 +377,7 @@ if (-not (Get-Command nssm -ErrorAction SilentlyContinue)) {
 # ── Deploy NSSM to tools directory (required for VSA service accounts) ────────
 # winget installs NSSM to C:\Users\...\AppData which NT SERVICE\* Virtual Service
 # Accounts cannot access. The SCM calls CreateProcessAsUser() with the VSA token,
-# and Windows checks that the VSA can read the service binary — if not, StartService
+# and Windows checks that the VSA can read the service binary  -  if not, StartService
 # fails with ERROR_ACCESS_DENIED (5). Copying nssm.exe to $InstallPath
 # (C:\ProgramData\SEIP\.tools) which VSAs already have Full Control on fixes this.
 $NssmCmd = Get-Command nssm -ErrorAction SilentlyContinue
@@ -393,8 +393,135 @@ if ($NssmCmd) {
     Add-ToPath $InstallPath
 }
 
+# --- 4. Python venv for fetch_lua_filters.py ---
+Write-Host "`n--- Checking Python venv ---" -ForegroundColor Cyan
+
+$AgentPath = "C:\ProgramData\SEIP"
+if ($ConfigContent -match 'AgentPath:\s*"(.*)"')        { $AgentPath = $matches[1] }
+elseif ($ConfigContent -match "AgentPath:\s*'(.*)'")    { $AgentPath = $matches[1] }
+elseif ($ConfigContent -match 'AgentPath:\s*([^"\s]+)') { $AgentPath = $matches[1] }
+
+$VenvPath  = Join-Path $AgentPath ".venv"
+$VenvPy    = Join-Path $VenvPath "Scripts\python.exe"
+$VenvPip   = Join-Path $VenvPath "Scripts\pip.exe"
+
+# Returns $true if the path lives inside a user-profile directory.
+# Venvs built from a user-profile Python cannot be executed by
+# NT SERVICE\SentinelAgent because the base interpreter is inaccessible
+# to the Virtual Service Account's restricted token.
+function Test-IsUserProfilePath([string]$path) {
+    $lpath = $path.ToLower()
+    foreach ($base in @($env:LOCALAPPDATA, $env:APPDATA, $env:USERPROFILE)) {
+        if ($base -and $lpath.StartsWith($base.ToLower())) { return $true }
+    }
+    return $false
+}
+
+# Check if an existing venv was built from a user-profile Python
+$venvNeedsRebuild = $false
+$venvCfg = Join-Path $VenvPath "pyvenv.cfg"
+if (Test-Path $venvCfg) {
+    $cfgHomeLine = Get-Content $venvCfg | Where-Object { $_ -match '^home\s*=' } | Select-Object -First 1
+    if ($cfgHomeLine) {
+        $cfgHome = ($cfgHomeLine -replace '^home\s*=\s*', '').Trim()
+        if (Test-IsUserProfilePath $cfgHome) {
+            Write-Warning "  Existing venv uses a user-profile Python ($cfgHome)."
+            Write-Warning "  NT SERVICE\SentinelAgent cannot access that path - venv will be rebuilt."
+            $venvNeedsRebuild = $true
+        }
+    }
+}
+
+# Find a system-wide Python (not inside the current user's profile).
+# User-profile Pythons are invisible to NT SERVICE\* virtual service accounts.
+# Also probe well-known system-wide install directories in case Python was
+# installed for all users but its bin dir was not added to the machine PATH.
+function Find-SystemPython {
+    # 1. Check PATH entries
+    $fromPath = @('python', 'python3', 'py') | ForEach-Object {
+        $cmd = Get-Command $_ -ErrorAction SilentlyContinue
+        if ($cmd -and -not (Test-IsUserProfilePath $cmd.Source)) { $cmd.Source }
+    } | Where-Object { $_ } | Select-Object -First 1
+    if ($fromPath) { return $fromPath }
+
+    # 2. Probe standard system-wide install roots
+    $searchRoots = @(
+        "$env:ProgramFiles",
+        "${env:ProgramFiles(x86)}",
+        "C:\Python3",   # legacy single-dir installs
+        "C:\Python"
+    ) | Where-Object { $_ -and (Test-Path $_) }
+
+    foreach ($root in $searchRoots) {
+        # Matches Python313, Python3, Python314, etc.
+        $candidates = Get-ChildItem -Path $root -Filter "Python3*" -Directory -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending  # prefer newer versions
+        foreach ($dir in $candidates) {
+            $exe = Join-Path $dir.FullName "python.exe"
+            if (Test-Path $exe) { return $exe }
+        }
+        # Also check directly under root (e.g. C:\Python3\python.exe)
+        $direct = Join-Path $root "python.exe"
+        if (Test-Path $direct) { return $direct }
+    }
+    return $null
+}
+
+$SysPy = Find-SystemPython
+
+if (-not $SysPy) {
+    # Try winget with versioned package IDs (unversioned 'Python.Python.3' resolves to
+    # the Microsoft Store stub which lacks a machine-scope installer and returns 0x8A150014).
+    Write-Host "  No system-wide Python found. Installing Python 3 for all users via winget..."
+    $installed = $false
+    foreach ($pkgId in @('Python.Python.3.14', 'Python.Python.3.13', 'Python.Python.3.12')) {
+        Write-Host "  Trying $pkgId ..."
+        winget install $pkgId --scope machine --silent --accept-package-agreements --accept-source-agreements
+        if ($LASTEXITCODE -eq 0) { $installed = $true; break }
+    }
+    if (-not $installed) {
+        Write-Warning "  winget install failed for all tried Python versions."
+    }
+    $global:LASTEXITCODE = 0  # winget failure is non-fatal; don't let it poison the script exit code
+    # Refresh PATH in the current session
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" +
+                [System.Environment]::GetEnvironmentVariable("Path","User")
+    $SysPy = Find-SystemPython
+}
+
+if (-not $SysPy) {
+    Write-Warning "Python not found in system locations  -  skipping venv setup."
+    Write-Warning "Install Python 3 for all users (e.g. 'winget install Python.Python.3.13 --scope machine') and re-run."
+} else {
+    Write-Host "  Using system Python: $SysPy" -ForegroundColor DarkGray
+
+    if ($venvNeedsRebuild -and (Test-Path $VenvPath)) {
+        Write-Host "  Removing stale user-profile-based venv..."
+        Remove-Item $VenvPath -Recurse -Force
+    }
+
+    if (Test-Path $VenvPy) {
+        Write-Host "  Python venv already exists at $VenvPath" -ForegroundColor DarkGray
+    } else {
+        Write-Host "  Creating Python venv at $VenvPath..."
+        & $SysPy -m venv $VenvPath
+        if (-not (Test-Path $VenvPy)) {
+            Write-Warning "  venv creation failed  -  Lua filter fetch may not work at runtime."
+        } else {
+            Write-Host "  OK venv created" -ForegroundColor Green
+        }
+    }
+
+    if (Test-Path $VenvPip) {
+        Write-Host "  Installing/verifying 'cryptography' package..."
+        & $VenvPip install --quiet --upgrade cryptography
+        Write-Host "  OK cryptography package ready" -ForegroundColor Green
+    }
+}
+
 # Cleanup Temp
 if (Test-Path $TempDir) { Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue }
 
 Write-Host "`nPrerequisites check/installation complete." -ForegroundColor Green
+exit 0
 
