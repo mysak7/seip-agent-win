@@ -5,7 +5,7 @@ foreach ($svcName in @("SentinelAgent", "SentinelLuaWatcher")) {
     Write-Host "`n── $svcName ──────────────────────────────────"
 
     if (-not (Get-Service $svcName -ErrorAction SilentlyContinue)) {
-        Write-Warning "$svcName not found — skipping."
+        Write-Warning "$svcName not found  -  skipping."
         continue
     }
 
@@ -24,7 +24,7 @@ foreach ($svcName in @("SentinelAgent", "SentinelLuaWatcher")) {
 
     $startName = (& sc.exe qc $svcName | Select-String "SERVICE_START_NAME").ToString().Trim()
     if ($startName -notmatch [regex]::Escape("NT SERVICE\$svcName")) {
-        Write-Error "VSA not applied — sc.exe qc reports: $startName"
+        Write-Error "VSA not applied  -  sc.exe qc reports: $startName"
         continue
     }
     Write-Host "  Verified: $startName" -ForegroundColor Green

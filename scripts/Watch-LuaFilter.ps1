@@ -5,33 +5,21 @@
 
 $BundleUrl   = "https://mysak7-seip-lua.s3.eu-central-1.amazonaws.com/bundle/manifest.json"
 $ServiceName = "SentinelAgent"
+$FetchScript = Join-Path $PSScriptRoot "fetch_lua_filters.py"
 
-# RSA-4096 SubjectPublicKeyInfo (DER, base64) — KMS alias: dev-seip-lua-signing
-# Rotate this value if the KMS key is rotated.
-# This default is overridden by LUA_PUBLIC_KEY_B64 in ..\.env (written by Terraform).
-$LuaPublicKeyB64 = @"
-MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAq2patvrcDkKx62yMFhYI
-WBLFuDu84yw3XJyvlfCwKFtoLEYgYSICMbNbjoT8U6I4dHMWiGPQKsGCJjGT3Ovq
-aFMPGWEjxWr6yMTtO731gha27ODlUehQeBec2n17gwjL5oW5GCGZGwQkvv62Q5Xe
-cQNqW1V3n43RUXMIskxp6GwoFGaDZUCY2YuLtWs0Nh2mkTKVDexO9wCcbPnN9oEM
-iIu6jhoVJr2ogTV71Q+BbGsvNfDU4lbk+s6e/N4iewCsUBJG29+9lR7a7c9cAPzw
-TURlX+SSMJFXSEl3aQfxvHOTUNo73OF6jwfBw+hoOolucDotewZOs21L4KylUQad
-0LKV/RsXdJBZaYViSdlmdmAUyP/rv4xDHWR5LFuJH7rKcAd9JNR4iXzGHdp9gAMt
-nA2xsISB3DLYUrv2HpEcZS4bDr94WOh5ELhhFKGIMaVwAgoat0GSrgNnEZnyA83o
-RMb4GTpxMwNomDH4OAc4firtr5V+Motz3ez+4upraBE/2b2a6Iwuwvq+d2IfPDUW
-NqccOeKwlWcGtYSXPOZwVhJ/xRXbaXnaylCP+sZ72y0I0WW+7ltChKdkpyt7F7tt
-Oumwwq0qQKRevQIdYHNTK9IjkPzLb4lxNimPPdNQFpOEcd+gPxGB9iy0sd6DHsxj
-JAdET6rKkCvB1PbXrK+kxekCAwEAAQ==
-"@
-
-# Override public key from ..\.env if present (written by `terraform apply`)
-$EnvFilePath = Join-Path $PSScriptRoot "..\.env"
-if (Test-Path $EnvFilePath) {
-    foreach ($line in (Get-Content $EnvFilePath)) {
-        if ($line -match '^LUA_PUBLIC_KEY_B64=(.+)$') {
-            $LuaPublicKeyB64 = $matches[1]
-            break
+# --- Read public key from .env (written by Terraform) ---
+# When deployed to $AgentPath the script is no longer under the repo root, so check
+# the same directory first (deployed copy) then fall back to ..\.env (dev/source tree).
+$LuaPublicKeyB64 = $null
+foreach ($candidate in @(
+    (Join-Path $PSScriptRoot ".env"),
+    (Join-Path $PSScriptRoot "..\.env")
+)) {
+    if (Test-Path $candidate) {
+        foreach ($line in (Get-Content $candidate)) {
+            if ($line -match '^LUA_PUBLIC_KEY_B64=(.+)$') { $LuaPublicKeyB64 = $matches[1]; break }
         }
+        if ($LuaPublicKeyB64) { break }
     }
 }
 
@@ -71,101 +59,9 @@ function Get-SecondsUntilNextRun {
     return $minToNext * 60 - $now.Second
 }
 
-# Parses a DER length field; advances $idx past the length bytes; returns the length value.
-function Read-DerLength {
-    param([byte[]]$b, [ref]$idx)
-    $first = $b[$idx.Value]; $idx.Value++
-    if ($first -lt 0x80) { return [int]$first }
-    $n = $first -band 0x7F
-    $len = 0
-    for ($k = 0; $k -lt $n; $k++) { $len = ($len -shl 8) -bor $b[$idx.Value]; $idx.Value++ }
-    return $len
-}
-
-# Imports an RSA public key from a SubjectPublicKeyInfo DER (base64).
-# Compatible with both PS 5.1 (.NET Framework 4.6+) and PS 7+ (.NET 5+).
-function New-RSAFromSpki {
-    param([string]$Base64Spki)
-    $der = [Convert]::FromBase64String(($Base64Spki -replace '\s+', ''))
-
-    # Try .NET Core 3+ / .NET 5+ path
-    try {
-        $rsa = [System.Security.Cryptography.RSA]::Create()
-        $read = 0
-        $rsa.ImportSubjectPublicKeyInfo([byte[]]$der, [ref]$read)
-        return $rsa
-    } catch { }
-
-    # Fallback: parse SPKI DER manually to extract RSAParameters (works on .NET Framework 4.6+)
-    $i = [ref]0
-    if ($der[$i.Value] -ne 0x30) { throw "SPKI: expected outer SEQUENCE" }; $i.Value++
-    Read-DerLength $der $i | Out-Null          # outer SEQUENCE length
-    if ($der[$i.Value] -ne 0x30) { throw "SPKI: expected AlgorithmIdentifier" }; $i.Value++
-    $algLen = Read-DerLength $der $i
-    $i.Value += $algLen                         # skip AlgorithmIdentifier contents
-    if ($der[$i.Value] -ne 0x03) { throw "SPKI: expected BIT STRING" }; $i.Value++
-    Read-DerLength $der $i | Out-Null          # BIT STRING length
-    $i.Value++                                  # skip unused-bits byte (0x00)
-    if ($der[$i.Value] -ne 0x30) { throw "RSAPublicKey: expected SEQUENCE" }; $i.Value++
-    Read-DerLength $der $i | Out-Null          # RSAPublicKey SEQUENCE length
-    # modulus
-    if ($der[$i.Value] -ne 0x02) { throw "RSAPublicKey: expected modulus INTEGER" }; $i.Value++
-    $nLen = Read-DerLength $der $i
-    $nBytes = $der[$i.Value..($i.Value + $nLen - 1)]; $i.Value += $nLen
-    # exponent
-    if ($der[$i.Value] -ne 0x02) { throw "RSAPublicKey: expected exponent INTEGER" }; $i.Value++
-    $eLen = Read-DerLength $der $i
-    $eBytes = $der[$i.Value..($i.Value + $eLen - 1)]
-
-    # Strip DER positive-integer leading zero
-    while ($nBytes.Length -gt 1 -and $nBytes[0] -eq 0x00) { $nBytes = $nBytes[1..($nBytes.Length-1)] }
-    while ($eBytes.Length -gt 1 -and $eBytes[0] -eq 0x00) { $eBytes = $eBytes[1..($eBytes.Length-1)] }
-
-    $params = New-Object System.Security.Cryptography.RSAParameters
-    $params.Modulus  = [byte[]]$nBytes
-    $params.Exponent = [byte[]]$eBytes
-    # PROV_RSA_AES (type 24) supports 4096-bit keys on .NET Framework.
-    # NoPrompt + PersistKeyInCsp=false: required for Virtual Service Accounts
-    # (no user profile loaded — avoids CSP key-container store access failure).
-    $csp = New-Object System.Security.Cryptography.CspParameters(24)
-    $csp.Flags = [System.Security.Cryptography.CspProviderFlags]::NoPrompt
-    $rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider(([int]$nBytes.Count * 8), $csp)
-    $rsa.PersistKeyInCsp = $false
-    $rsa.ImportParameters($params)
-    return $rsa
-}
-
-# Verifies the bundle signature. Returns $true if valid, throws on invalid.
-# Canonical payload mirrors Python: json.dumps({"generated_at":…,"noise_filter":…,"alert_filter":…},
-#   separators=(',',':'), ensure_ascii=False)
-function Test-BundleSignature {
-    param([PSCustomObject]$Bundle)
-
-    if (-not $Bundle.signature) { throw "Bundle missing 'signature' field." }
-
-    $ordered = [ordered]@{
-        generated_at = $Bundle.generated_at
-        noise_filter = $Bundle.noise_filter
-        user_filter  = $Bundle.user_filter
-    }
-    $canonical = $ordered | ConvertTo-Json -Compress -Depth 10
-    # PowerShell 7 / System.Text.Json escapes <, >, & as \uXXXX — undo to match Python output
-    $canonical = $canonical -replace '\\u003c','<' -replace '\\u003e','>' -replace '\\u0026','&'
-
-    $payloadBytes = [System.Text.Encoding]::UTF8.GetBytes($canonical)
-    $sigBytes     = [Convert]::FromBase64String($Bundle.signature)
-
-    $rsa = New-RSAFromSpki -Base64Spki $LuaPublicKeyB64
-    try {
-        return $rsa.VerifyData(
-            [byte[]]$payloadBytes,
-            [byte[]]$sigBytes,
-            [System.Security.Cryptography.HashAlgorithmName]::SHA256,
-            [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
-        )
-    } finally {
-        $rsa.Dispose()
-    }
+if (-not $LuaPublicKeyB64) {
+    Write-Log "LUA_PUBLIC_KEY_B64 not found in .env - cannot verify bundles." "ERROR"
+    exit 1
 }
 
 Write-Log "Lua filter watcher started. Schedule: every 5 min, aligned to :02/:07/:12/..."
@@ -177,49 +73,36 @@ while ($true) {
     Start-Sleep -Seconds $waitSec
 
     try {
-        # 1. Fetch signed bundle manifest
-        $json   = Invoke-WebRequest -Uri $BundleUrl -UseBasicParsing -TimeoutSec 15 |
-                  Select-Object -ExpandProperty Content
-        $bundle = $json | ConvertFrom-Json
+        $_venvPy = @(
+            (Join-Path $PSScriptRoot ".venv\Scripts\python.exe"),
+            (Join-Path $AgentPath    ".venv\Scripts\python.exe")
+        ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+        $pyExe = if ($_venvPy) { $_venvPy } else {
+            @('python', 'python3', 'py') | Where-Object { Get-Command $_ -ErrorAction SilentlyContinue } | Select-Object -First 1
+        }
+        if (-not $pyExe) { throw "Python not found. Create a .venv with 'python -m venv .venv && .venv\Scripts\pip install cryptography' or install Python 3 on PATH." }
+        $pyOut = & $pyExe $FetchScript `
+            --bundle-url  $BundleUrl `
+            --pub-key-b64 $LuaPublicKeyB64 `
+            --llm-path    $LocalNoiseLuaPath `
+            --alert-path  $LocalAlertLuaPath `
+            --state-file  $StateFilePath 2>&1
 
-        $remoteTs = $bundle.generated_at
-        if (-not $remoteTs) { throw "Bundle missing 'generated_at' field." }
-
-        # 2. Compare against last known timestamp
-        $lastTs = if (Test-Path $StateFilePath) {
-            Get-Content $StateFilePath -Raw | ForEach-Object { $_.Trim() }
-        } else { "" }
-
-        if ($remoteTs -ne $lastTs) {
-            Write-Log "New bundle detected. Remote ts=$remoteTs  Last ts=$lastTs"
-
-            # 3. Verify RSA-4096 PKCS#1v1.5-SHA256 signature
-            $valid = Test-BundleSignature -Bundle $bundle
-            if (-not $valid) {
-                Write-Log "SECURITY: Bundle signature verification FAILED — discarding update." "ERROR"
-                continue
-            }
-            Write-Log "Signature verified OK (key_id=$($bundle.key_id))"
-
-            # 4. Write both Lua filters atomically
-            [IO.File]::WriteAllText($LocalNoiseLuaPath,  $bundle.noise_filter, [System.Text.Encoding]::UTF8)
-            [IO.File]::WriteAllText($LocalAlertLuaPath, $bundle.user_filter,   [System.Text.Encoding]::UTF8)
-            Write-Log "Written: llm_filter.lua + alert_filter.lua"
-
-            # 5. Persist new timestamp
-            Set-Content -Path $StateFilePath -Value $remoteTs -Encoding ASCII
-
-            # 6. Restart SentinelAgent so Fluent Bit picks up the new filters
+        if ($LASTEXITCODE -eq 0) {
+            Write-Log $pyOut
+            # Restart SentinelAgent so Fluent Bit picks up the new filters
             $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
             if ($svc) {
                 Write-Log "Restarting $ServiceName..."
                 Restart-Service -Name $ServiceName -Force
                 Write-Log "$ServiceName restarted successfully."
             } else {
-                Write-Log "$ServiceName not found — skipping restart." "WARN"
+                Write-Log "$ServiceName not found - skipping restart." "WARN"
             }
+        } elseif ($LASTEXITCODE -eq 2) {
+            Write-Log $pyOut  # up-to-date
         } else {
-            Write-Log "Lua filters up-to-date (ts=$remoteTs)."
+            Write-Log "fetch_lua_filters.py error: $pyOut" "ERROR"
         }
     } catch {
         Write-Log "Error during check: $_" "ERROR"

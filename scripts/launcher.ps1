@@ -3,8 +3,7 @@
 # Read Config from YAML (Simple Parse)
 $AgentPath = "C:\ProgramData\SEIP"
 $ToolsPath = "C:\ProgramData\SEIP\.tools"
-$AllowStartWithoutLatestFilters = $true
-
+$AllowStartWithoutLatestFilters = $false
 $ConfigPath = Join-Path $PSScriptRoot "..\config.yaml"
 if (-not (Test-Path $ConfigPath)) {
     Write-Warning "Config file not found at $ConfigPath. Using defaults."
@@ -36,65 +35,12 @@ $LocalLuaPath      = Join-Path $AgentPath "sysmon_security.lua"
 $RepoLuaPath       = Join-Path $_repoFbDir "sysmon_security.lua"
 $LocalPackLuaPath  = Join-Path $AgentPath "sysmon_pack.lua"
 $RepoPackLuaPath   = Join-Path $_repoFbDir "sysmon_pack.lua"
-$LocalLlmLuaPath    = Join-Path $AgentPath "llm_filter.lua"
-$LocalAlertLuaPath  = Join-Path $AgentPath "alert_filter.lua"
-$BundleUrl          = "https://mysak7-seip-lua.s3.eu-central-1.amazonaws.com/bundle/manifest.json"
-$FluentBitExe       = Join-Path $ToolsPath "fluent-bit\bin\fluent-bit.exe"
-
-
-function _Read-DerLength {
-    param([byte[]]$b, [ref]$idx)
-    $first = $b[$idx.Value]; $idx.Value++
-    if ($first -lt 0x80) { return [int]$first }
-    $n = $first -band 0x7F; $len = 0
-    for ($k = 0; $k -lt $n; $k++) { $len = ($len -shl 8) -bor $b[$idx.Value]; $idx.Value++ }
-    return $len
-}
-
-function _New-RSAFromSpki {
-    param([string]$Base64Spki)
-    $der = [Convert]::FromBase64String(($Base64Spki -replace '\s+', ''))
-    try {
-        $rsa = [System.Security.Cryptography.RSA]::Create()
-        $read = 0; $rsa.ImportSubjectPublicKeyInfo([byte[]]$der, [ref]$read); return $rsa
-    } catch { }
-    $i = [ref]0
-    $der[$i.Value++] | Out-Null                          # outer SEQUENCE tag
-    _Read-DerLength $der $i | Out-Null
-    $der[$i.Value++] | Out-Null                          # AlgorithmIdentifier tag
-    $i.Value += _Read-DerLength $der $i                  # skip AlgorithmIdentifier
-    $der[$i.Value++] | Out-Null                          # BIT STRING tag
-    _Read-DerLength $der $i | Out-Null; $i.Value++       # BIT STRING length + unused bits
-    $der[$i.Value++] | Out-Null                          # RSAPublicKey SEQUENCE tag
-    _Read-DerLength $der $i | Out-Null
-    $der[$i.Value++] | Out-Null; $nLen = _Read-DerLength $der $i  # modulus tag + length
-    $nBytes = $der[$i.Value..($i.Value + $nLen - 1)]; $i.Value += $nLen
-    $der[$i.Value++] | Out-Null; $eLen = _Read-DerLength $der $i  # exponent tag + length
-    $eBytes = $der[$i.Value..($i.Value + $eLen - 1)]
-    while ($nBytes.Length -gt 1 -and $nBytes[0] -eq 0x00) { $nBytes = $nBytes[1..($nBytes.Length-1)] }
-    while ($eBytes.Length -gt 1 -and $eBytes[0] -eq 0x00) { $eBytes = $eBytes[1..($eBytes.Length-1)] }
-    $p = New-Object System.Security.Cryptography.RSAParameters
-    $p.Modulus = [byte[]]$nBytes; $p.Exponent = [byte[]]$eBytes
-    # PROV_RSA_AES (type 24) supports 4096-bit keys on .NET Framework; NoPrompt for non-interactive use
-    $csp = New-Object System.Security.Cryptography.CspParameters(24)
-    $csp.Flags = [System.Security.Cryptography.CspProviderFlags]::NoPrompt
-    $rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider(([int]$nBytes.Count * 8), $csp)
-    $rsa.PersistKeyInCsp = $false
-    $rsa.ImportParameters($p); return $rsa
-}
-
-function _Test-BundleSignature {
-    param([PSCustomObject]$Bundle)
-    $ordered = [ordered]@{ generated_at=$Bundle.generated_at; noise_filter=$Bundle.noise_filter; user_filter=$Bundle.user_filter }
-    $canonical = ($ordered | ConvertTo-Json -Compress -Depth 10) -replace '\\u003c','<' -replace '\\u003e','>' -replace '\\u0026','&'
-    $rsa = _New-RSAFromSpki -Base64Spki $LuaPublicKeyB64
-    try {
-        return $rsa.VerifyData([System.Text.Encoding]::UTF8.GetBytes($canonical),
-            [Convert]::FromBase64String($Bundle.signature),
-            [System.Security.Cryptography.HashAlgorithmName]::SHA256,
-            [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
-    } finally { $rsa.Dispose() }
-}
+$LocalLlmLuaPath   = Join-Path $AgentPath "llm_filter.lua"
+$LocalAlertLuaPath = Join-Path $AgentPath "alert_filter.lua"
+$StateFilePath     = Join-Path $AgentPath "lua_filter.state"
+$BundleUrl         = "https://mysak7-seip-lua.s3.eu-central-1.amazonaws.com/bundle/manifest.json"
+$FluentBitExe      = Join-Path $ToolsPath "fluent-bit\bin\fluent-bit.exe"
+$FetchScript       = Join-Path $PSScriptRoot "fetch_lua_filters.py"
 
 # --- Pre-flight Checks ---
 # Check if Sysmon is available (Required for agent-config.tpl)
@@ -114,15 +60,15 @@ if (!(Test-Path $AgentPath)) {
 # 2. Load Credentials
 Write-Host "Loading credentials..."
 try {
-    $KafkaUser = $env:PRODUCER_API_KEY
-    $KafkaPass = $env:PRODUCER_API_SECRET
-    $BrokerUrl = $env:BOOTSTRAP_SERVER
-
+    $KafkaUser       = $env:PRODUCER_API_KEY
+    $KafkaPass       = $env:PRODUCER_API_SECRET
+    $BrokerUrl       = $env:BOOTSTRAP_SERVER
     $LuaPublicKeyB64 = $env:LUA_PUBLIC_KEY_B64
+
     if (-not $KafkaUser -or -not $KafkaPass -or -not $BrokerUrl -or -not $LuaPublicKeyB64) {
         # Fallback to .env file. Check two locations:
-        #   1. Repo root  — works when running manually as an interactive user
-        #   2. $AgentPath — works when running as NT SERVICE\SentinelAgent (VSA has Full Control
+        #   1. Repo root   -  works when running manually as an interactive user
+        #   2. $AgentPath  -  works when running as NT SERVICE\SentinelAgent (VSA has Full Control
         #      on $AgentPath but no access to the user-profile repo directory)
         $envCandidates = @("$PSScriptRoot\..\.env", (Join-Path $AgentPath ".env"))
         $envFile = $envCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
@@ -138,9 +84,9 @@ try {
     }
 
     $missing = @()
-    if (-not $KafkaUser) { $missing += "PRODUCER_API_KEY" }
-    if (-not $KafkaPass) { $missing += "PRODUCER_API_SECRET" }
-    if (-not $BrokerUrl) { $missing += "BOOTSTRAP_SERVER" }
+    if (-not $KafkaUser)       { $missing += "PRODUCER_API_KEY" }
+    if (-not $KafkaPass)       { $missing += "PRODUCER_API_SECRET" }
+    if (-not $BrokerUrl)       { $missing += "BOOTSTRAP_SERVER" }
     if (-not $LuaPublicKeyB64) { $missing += "LUA_PUBLIC_KEY_B64" }
     if ($missing.Count -gt 0) {
         throw "Missing credentials: $($missing -join ', '). Set them as environment variables or add to .env file."
@@ -161,7 +107,6 @@ try {
     } else {
         throw "Configuration template not found at $LocalTemplatePath"
     }
-
 } catch {
     Write-Error "Cannot load config template. $_"
     exit 1
@@ -185,20 +130,53 @@ if (Test-Path $RepoPackLuaPath) {
 } elseif (-not (Test-Path $LocalPackLuaPath)) {
     Write-Warning "Lua pack script not found at $RepoPackLuaPath - payload compaction will be disabled."
 }
-try {
-    $bundleJson   = Invoke-WebRequest -Uri $BundleUrl -UseBasicParsing -TimeoutSec 15 | Select-Object -ExpandProperty Content
-    $bundleObj    = $bundleJson | ConvertFrom-Json
-    $sigValid     = _Test-BundleSignature -Bundle $bundleObj
-    if (-not $sigValid) { throw "Bundle signature verification FAILED - filters NOT written." }
-    [IO.File]::WriteAllText($LocalLlmLuaPath,   $bundleObj.noise_filter, [System.Text.Encoding]::UTF8)
-    [IO.File]::WriteAllText($LocalAlertLuaPath, $bundleObj.user_filter, [System.Text.Encoding]::UTF8)
-    Write-Host "Lua filters loaded and verified from signed bundle (ts=$($bundleObj.generated_at))." -ForegroundColor Green
-} catch {
-    if (-not $AllowStartWithoutLatestFilters) {
-        Write-Error "Failed to download/verify Lua filter bundle: $_ - LLM filtering cannot fall back to cached files (AllowStartWithoutLatestFilters=false)."
+
+# Download, verify and write llm_filter.lua + alert_filter.lua via Python
+Write-Host "Fetching Lua filter bundle..."
+$_venvPy = @(
+    (Join-Path $PSScriptRoot   ".venv\Scripts\python.exe"),
+    (Join-Path $AgentPath      ".venv\Scripts\python.exe")
+) | Where-Object {
+    if (-not (Test-Path $_)) { return $false }
+    # Verify the venv python is actually executable by this account
+    try { & $_ --version 2>&1 | Out-Null; $LASTEXITCODE -eq 0 } catch { $false }
+} | Select-Object -First 1
+$pyExe = if ($_venvPy) { $_venvPy } else {
+    @('python', 'python3', 'py') | ForEach-Object {
+        $cmd = Get-Command $_ -ErrorAction SilentlyContinue
+        if ($cmd) {
+            # Verify the resolved executable actually runs under this account.
+            # File-read access is not sufficient: e.g. `py.exe` (the Python launcher)
+            # may be readable but delegate to a user-profile python.exe that the
+            # service account (NT SERVICE\SentinelAgent) cannot execute.
+            try {
+                & $cmd.Source --version 2>&1 | Out-Null
+                if ($LASTEXITCODE -eq 0) { $cmd.Source }
+            } catch { <# not executable - skip #> }
+        }
+    } | Where-Object { $_ } | Select-Object -First 1
+}
+if (-not $pyExe) {
+    $pyMsg = "Python not found. Create a .venv with 'python -m venv .venv && .venv\Scripts\pip install cryptography' or install Python 3 on PATH."
+    if ($AllowStartWithoutLatestFilters) { Write-Warning $pyMsg } else { Write-Error $pyMsg; exit 1 }
+}
+$pyOut = & $pyExe $FetchScript `
+    --bundle-url  $BundleUrl `
+    --pub-key-b64 $LuaPublicKeyB64 `
+    --llm-path    $LocalLlmLuaPath `
+    --alert-path  $LocalAlertLuaPath `
+    --state-file  $StateFilePath 2>&1
+if ($LASTEXITCODE -eq 0) {
+    Write-Host $pyOut -ForegroundColor Green
+} elseif ($LASTEXITCODE -eq 2) {
+    Write-Host $pyOut  # up-to-date, not an error
+} else {
+    if ($AllowStartWithoutLatestFilters) {
+        Write-Warning "Failed to fetch/verify Lua filters: $pyOut"
+    } else {
+        Write-Error "Failed to fetch/verify Lua filters: $pyOut"
         exit 1
     }
-    Write-Warning "Failed to download/verify Lua filter bundle: $_ - LLM filtering will use last cached files."
 }
 
 # 6. Saving final config (only for this run)

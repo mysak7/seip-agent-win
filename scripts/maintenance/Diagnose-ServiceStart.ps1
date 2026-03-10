@@ -5,7 +5,7 @@ foreach ($svcName in @("SentinelAgent", "SentinelLuaWatcher")) {
     Write-Host "`n══ $svcName ══════════════════════════════════" -ForegroundColor Cyan
 
     $svc = Get-Service $svcName -ErrorAction SilentlyContinue
-    if (-not $svc) { Write-Warning "$svcName not found — skipping."; continue }
+    if (-not $svc) { Write-Warning "$svcName not found  -  skipping."; continue }
 
     Write-Host "Current status : $($svc.Status)"
     Write-Host "Start type     : $($svc.StartType)"

@@ -92,7 +92,7 @@ foreach ($svcName in @("SentinelAgent", "SentinelLuaWatcher")) {
     }
 }
 
-Write-Log "Polling for powershell.exe every ${PollMs}ms — press Ctrl+C to stop."
+Write-Log "Polling for powershell.exe every ${PollMs}ms  -  press Ctrl+C to stop."
 
 # ── main polling loop ─────────────────────────────────────────────────────────
 

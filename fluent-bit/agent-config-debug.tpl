@@ -64,19 +64,19 @@
 [FILTER]
     Name    lua
     Match   *
-    script  {{AGENT_PATH}}\llm_filter.lua
+    script  llm_filter.lua
     call    drop_noise
 
 [FILTER]
     Name    lua
     Match   *
-    script  {{AGENT_PATH}}\sysmon_security.lua
+    script  sysmon_security.lua
     call    cb_filter
 
 [FILTER]
     Name    lua
     Match   *
-    script  {{AGENT_PATH}}\sysmon_pack.lua
+    script  sysmon_pack.lua
     call    cb_pack
 
 [OUTPUT]

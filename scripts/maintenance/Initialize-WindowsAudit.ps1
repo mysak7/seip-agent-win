@@ -9,11 +9,11 @@
     Fluent Bit agent. Run once per endpoint before deploying the agent.
 
     What it sets up:
-      1. Event log sizes  — prevents data loss under load
-      2. Audit policies   — enables only high-signal subcategories
-      3. PowerShell SBL   — EID 4104 (Script Block Logging)
-      4. Registry SACLs   — EID 4657 on persistence / credential keys
-      5. WMI log          — enables Microsoft-Windows-WMI-Activity/Operational
+      1. Event log sizes   -  prevents data loss under load
+      2. Audit policies    -  enables only high-signal subcategories
+      3. PowerShell SBL    -  EID 4104 (Script Block Logging)
+      4. Registry SACLs    -  EID 4657 on persistence / credential keys
+      5. WMI log           -  enables Microsoft-Windows-WMI-Activity/Operational
 
 .PARAMETER SkipLogResize
     Skip step 1 (event log size increases). Useful when log sizes are already
@@ -75,7 +75,7 @@ Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" `
 $auditPolicies = @(
     # ── Logon / Authentication ────────────────────────────────────────────────
     @{ sub = "Logon";                      guid = "{0CCE9215-69AE-11D9-BED3-505054503030}"; sf = "success,failure" },  # 4624, 4625, 4634
-    @{ sub = "Special Logon";              guid = "{0CCE921B-69AE-11D9-BED3-505054503030}"; sf = "success"         },  # 4672 — admin-eq priv on logon
+    @{ sub = "Special Logon";              guid = "{0CCE921B-69AE-11D9-BED3-505054503030}"; sf = "success"         },  # 4672  -  admin-eq priv on logon
     # ── Credential Use ────────────────────────────────────────────────────────
     @{ sub = "Sensitive Privilege Use";    guid = "{0CCE9228-69AE-11D9-BED3-505054503030}"; sf = "success,failure" },  # 4673, 4674
     # ── Process Tracking ──────────────────────────────────────────────────────
@@ -112,7 +112,7 @@ $sbPath = "HKLM:\Software\Policies\Microsoft\Windows\PowerShell\ScriptBlockLoggi
 New-Item $sbPath -Force -ErrorAction SilentlyContinue | Out-Null
 Set-ItemProperty $sbPath -Name EnableScriptBlockLogging -Value 1 -Type DWord -Force
 Write-Host "  OK Script Block Logging (EID 4104) enabled" -ForegroundColor Green
-# Note: EnableScriptBlockInvocationLogging is intentionally NOT set — it floods the log
+# Note: EnableScriptBlockInvocationLogging is intentionally NOT set  -  it floods the log
 # with 4105/4106 start/stop events that the Lua filter drops anyway.
 
 # ─────────────────────────────────────────────
@@ -140,7 +140,7 @@ function Set-RegistryAudit {
 }
 
 Set-RegistryAudit "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" `
-    "Run keys  (HKLM RunOnce/Run — startup persistence)"
+    "Run keys  (HKLM RunOnce/Run  -  startup persistence)"
 Set-RegistryAudit "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows" `
     "AppInit_DLLs  (DLL injection via registry)"
 Set-RegistryAudit "HKLM:\SYSTEM\CurrentControlSet\Control\LSA" `

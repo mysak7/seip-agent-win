@@ -82,7 +82,7 @@ if ($needRestart) {
             if ($svc.Status -eq "Running") { "Green" } else { "Red" }
         )
     } else {
-        Write-Host "  WARN SentinelAgent service not found — skipping restart." -ForegroundColor Yellow
+        Write-Host "  WARN SentinelAgent service not found  -  skipping restart." -ForegroundColor Yellow
     }
 } else {
     Write-Host "`n  SentinelAgent restart not needed." -ForegroundColor DarkGray
@@ -110,7 +110,7 @@ foreach ($p in $auditPolicies) {
     if ($LASTEXITCODE -eq 0) {
         Write-Host "  OK $($p.sub) [$($p.sf)]" -ForegroundColor Green
     } else {
-        Write-Host "  FAIL $($p.sub) — $out" -ForegroundColor Red
+        Write-Host "  FAIL $($p.sub)  -  $out" -ForegroundColor Red
     }
 }
 

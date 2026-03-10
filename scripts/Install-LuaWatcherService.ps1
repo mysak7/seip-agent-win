@@ -23,7 +23,7 @@ elseif ($cfg -match "AgentPath:\s*'(.*)'")    { $AgentPath = $matches[1] }
 elseif ($cfg -match 'AgentPath:\s*([^"\s]+)') { $AgentPath = $matches[1] }
 
 # Use the NSSM copy from the tools directory if present.
-# winget installs NSSM to C:\Users\...\AppData — NT SERVICE\* VSAs cannot execute it
+# winget installs NSSM to C:\Users\...\AppData  -  NT SERVICE\* VSAs cannot execute it
 # (CreateProcessAsUser checks the binary is readable by the target user token).
 # Prepend the tools path so 'nssm install' registers a VSA-accessible binary path.
 $ToolsNssm = Join-Path $AgentPath ".tools\nssm.exe"
@@ -52,13 +52,22 @@ if (Get-Service $ServiceName -ErrorAction SilentlyContinue) {
 $LogDir = Join-Path $AgentPath "logs"
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
 
-# --- Deploy watcher script to $AgentPath ---
+# --- Deploy watcher script and .env to $AgentPath ---
 # Running Watch-LuaFilter.ps1 from C:\Users\...\Documents\... while executing as a privileged VSA
 # is a Local Privilege Escalation vector: any process running as the installing user can modify
 # the script and have it executed with the VSA's privileges. $AgentPath is admin-only writable.
 Write-Host "Deploying Watch-LuaFilter.ps1 to $AgentPath..."
 Copy-Item -Path $WatcherScript -Destination (Join-Path $AgentPath "Watch-LuaFilter.ps1") -Force
 $WatcherScript = Join-Path $AgentPath "Watch-LuaFilter.ps1"
+
+# Deploy .env so the watcher can read LUA_PUBLIC_KEY_B64 from its deployed location.
+$EnvSrc = Join-Path $PSScriptRoot "..\.env"
+if (Test-Path $EnvSrc) {
+    Copy-Item -Path $EnvSrc -Destination (Join-Path $AgentPath ".env") -Force
+    Write-Host "  Deployed .env" -ForegroundColor DarkGray
+} else {
+    Write-Warning ".env not found at $EnvSrc - watcher will fail to verify bundles."
+}
 
 # --- Create service ---
 Write-Host "Installing $ServiceName..."
@@ -70,7 +79,7 @@ nssm set $ServiceName Start        SERVICE_AUTO_START
 
 # ── Least-privilege: run under Virtual Service Account ────────────────────────
 # IMPORTANT: Do NOT use `nssm set ObjectName` for Virtual Service Accounts.
-# NSSM calls LogonUser() which requires a password — VSAs have none, so it
+# NSSM calls LogonUser() which requires a password  -  VSAs have none, so it
 # returns Access Denied when SCM tries to start the service.
 # Use sc.exe config instead; SCM handles VSAs natively (no password needed).
 Write-Host "Configuring Virtual Service Account (NT SERVICE\$ServiceName) via sc.exe..."
@@ -83,7 +92,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 $startName = (& sc.exe qc $ServiceName | Select-String "SERVICE_START_NAME").ToString().Trim()
 if ($startName -notmatch [regex]::Escape("NT SERVICE\$ServiceName")) {
-    Write-Error "VSA not applied — sc.exe qc reports: $startName"
+    Write-Error "VSA not applied  -  sc.exe qc reports: $startName"
     exit 1
 }
 Write-Host "  Verified: $startName" -ForegroundColor Green
@@ -111,7 +120,7 @@ nssm set $ServiceName AppRotateFiles 1
 nssm set $ServiceName AppRotateBytes 5242880  # 5MB
 
 # ── File system permissions ───────────────────────────────────────────────────
-# Modify (not Full) — watcher writes Lua + state + logs, but cannot change ACLs.
+# Modify (not Full)  -  watcher writes Lua + state + logs, but cannot change ACLs.
 Write-Host "Granting NT SERVICE\$ServiceName Modify on $AgentPath..."
 & icacls $AgentPath /grant "NT SERVICE\${ServiceName}:(OI)(CI)M" /T | Out-Null
 
@@ -166,8 +175,8 @@ Write-Host "Starting $ServiceName..."
 Get-Service $ServiceName | Format-List Name, Status, StartType
 
 Write-Host "`nDone! Least-privilege summary:" -ForegroundColor Green
-Write-Host "  NT SERVICE\SentinelAgent     — Full Control on $AgentPath, Event Log Readers"
-Write-Host "  NT SERVICE\SentinelLuaWatcher — Modify on $AgentPath, Start/Stop SentinelAgent only"
+Write-Host "  NT SERVICE\SentinelAgent      -  Full Control on $AgentPath, Event Log Readers"
+Write-Host "  NT SERVICE\SentinelLuaWatcher  -  Modify on $AgentPath, Start/Stop SentinelAgent only"
 Write-Host "`nCommands:"
 Write-Host "  Stop:    nssm stop $ServiceName"
 Write-Host "  Start:   nssm start $ServiceName"
