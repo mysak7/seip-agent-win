@@ -35,9 +35,9 @@ $LocalLuaPath      = Join-Path $AgentPath "sysmon_security.lua"
 $RepoLuaPath       = Join-Path $_repoFbDir "sysmon_security.lua"
 $LocalPackLuaPath  = Join-Path $AgentPath "sysmon_pack.lua"
 $RepoPackLuaPath   = Join-Path $_repoFbDir "sysmon_pack.lua"
-$LocalLlmLuaPath   = Join-Path $AgentPath "llm_filter.lua"
-$LocalAlertLuaPath = Join-Path $AgentPath "alert_filter.lua"
-$StateFilePath     = Join-Path $AgentPath "lua_filter.state"
+$LocalNoiseFilterPath = Join-Path $AgentPath "noise_filter.lua"
+$LocalUserFilterPath  = Join-Path $AgentPath "user_filter.lua"
+$StateFilePath        = Join-Path $AgentPath "noise_filter.state"
 $BundleUrl         = "https://mysak7-seip-lua.s3.eu-central-1.amazonaws.com/bundle/manifest.json"
 $FluentBitExe      = Join-Path $ToolsPath "fluent-bit\bin\fluent-bit.exe"
 $FetchScript       = Join-Path $PSScriptRoot "fetch_lua_filters.py"
@@ -131,7 +131,7 @@ if (Test-Path $RepoPackLuaPath) {
     Write-Warning "Lua pack script not found at $RepoPackLuaPath - payload compaction will be disabled."
 }
 
-# Download, verify and write llm_filter.lua + alert_filter.lua via Python
+# Download, verify and write noise_filter.lua + user_filter.lua via Python
 Write-Host "Fetching Lua filter bundle..."
 $_venvPy = @(
     (Join-Path $PSScriptRoot   ".venv\Scripts\python.exe"),
@@ -163,8 +163,8 @@ if (-not $pyExe) {
 $pyOut = & $pyExe $FetchScript `
     --bundle-url  $BundleUrl `
     --pub-key-b64 $LuaPublicKeyB64 `
-    --llm-path    $LocalLlmLuaPath `
-    --alert-path  $LocalAlertLuaPath `
+    --noise-path  $LocalNoiseFilterPath `
+    --user-path   $LocalUserFilterPath `
     --state-file  $StateFilePath 2>&1
 if ($LASTEXITCODE -eq 0) {
     Write-Host $pyOut -ForegroundColor Green

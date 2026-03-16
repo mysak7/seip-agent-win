@@ -11,8 +11,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--bundle-url",  required=True)
     ap.add_argument("--pub-key-b64", required=True)
-    ap.add_argument("--llm-path",    required=True)
-    ap.add_argument("--alert-path",  required=True)
+    ap.add_argument("--noise-path",  required=True)
+    ap.add_argument("--user-path",   required=True)
     ap.add_argument("--state-file",  default=None,
                     help="Path to timestamp state file; skip write if already current.")
     args = ap.parse_args()
@@ -66,9 +66,9 @@ def main():
         sys.exit(1)
 
     # Write files
-    with open(args.llm_path,   "w", encoding="utf-8") as f:
+    with open(args.noise_path, "w", encoding="utf-8") as f:
         f.write(bundle["noise_filter"])
-    with open(args.alert_path, "w", encoding="utf-8") as f:
+    with open(args.user_path,  "w", encoding="utf-8") as f:
         f.write(bundle["user_filter"])
 
     # Update state file

@@ -1,6 +1,6 @@
 # --- Sentinel Lua Filter Watcher ---
 # Polls bundle/manifest.json from S3, verifies KMS RSA-4096 PKCS#1v1.5-SHA256 signature,
-# and writes both noise_filter (llm_filter.lua) and alert_filter (alert_filter.lua).
+# and writes both noise_filter (noise_filter.lua) and user_filter (user_filter.lua).
 # Runs every 5 minutes, clock-aligned to :02/:07/:12/:17/:22/...
 
 $BundleUrl   = "https://mysak7-seip-lua.s3.eu-central-1.amazonaws.com/bundle/manifest.json"
@@ -34,9 +34,9 @@ if (Test-Path $ConfigPath) {
     elseif ($cfg -match 'AgentPath:\s*([^"\s]+)') { $AgentPath = $matches[1] }
 }
 
-$LocalNoiseLuaPath = Join-Path $AgentPath "llm_filter.lua"
-$LocalAlertLuaPath = Join-Path $AgentPath "alert_filter.lua"
-$StateFilePath     = Join-Path $AgentPath "lua_filter.state"
+$LocalNoiseFilterPath = Join-Path $AgentPath "noise_filter.lua"
+$LocalUserFilterPath  = Join-Path $AgentPath "user_filter.lua"
+$StateFilePath        = Join-Path $AgentPath "noise_filter.state"
 $LogDir            = Join-Path $AgentPath "logs"
 
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
@@ -46,7 +46,7 @@ function Write-Log {
     $ts   = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ")
     $line = "[$ts] [$Level] $Message"
     Write-Host $line
-    Add-Content -Path (Join-Path $LogDir "lua-watcher.log") -Value $line
+    Add-Content -Path (Join-Path $LogDir "noise-watcher.log") -Value $line
 }
 
 # Returns seconds until the next clock minute where (minute % 5 == 2).
@@ -84,8 +84,8 @@ while ($true) {
         $pyOut = & $pyExe $FetchScript `
             --bundle-url  $BundleUrl `
             --pub-key-b64 $LuaPublicKeyB64 `
-            --llm-path    $LocalNoiseLuaPath `
-            --alert-path  $LocalAlertLuaPath `
+            --noise-path  $LocalNoiseFilterPath `
+            --user-path   $LocalUserFilterPath `
             --state-file  $StateFilePath 2>&1
 
         if ($LASTEXITCODE -eq 0) {
