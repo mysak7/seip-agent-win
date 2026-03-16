@@ -47,7 +47,11 @@ function Start-Svc([string]$Name) {
 
     Write-Host "  Starting $Name ..." -NoNewline
     try {
-        Start-Service -Name $Name
+        if ($status -eq 'Paused') {
+            Resume-Service -Name $Name
+        } else {
+            Start-Service -Name $Name
+        }
         Write-Host ' OK' -ForegroundColor Green
     } catch {
         Write-Host ' FAILED' -ForegroundColor Red

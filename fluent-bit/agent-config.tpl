@@ -68,7 +68,7 @@
     Name    lua
     Match   *
     script  static_filter.lua
-    call    cb_static
+    call    drop_noise
 
 [FILTER]
     Name    lua
