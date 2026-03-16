@@ -35,9 +35,10 @@ $LocalLuaPath      = Join-Path $AgentPath "sysmon_security.lua"
 $RepoLuaPath       = Join-Path $_repoFbDir "sysmon_security.lua"
 $LocalPackLuaPath  = Join-Path $AgentPath "sysmon_pack.lua"
 $RepoPackLuaPath   = Join-Path $_repoFbDir "sysmon_pack.lua"
-$LocalNoiseFilterPath = Join-Path $AgentPath "noise_filter.lua"
-$LocalUserFilterPath  = Join-Path $AgentPath "user_filter.lua"
-$StateFilePath        = Join-Path $AgentPath "noise_filter.state"
+$LocalNoiseFilterPath  = Join-Path $AgentPath "noise_filter.lua"
+$LocalUserFilterPath   = Join-Path $AgentPath "user_filter.lua"
+$LocalStaticFilterPath = Join-Path $AgentPath "static_filter.lua"
+$StateFilePath         = Join-Path $AgentPath "noise_filter.state"
 $BundleUrl         = "https://mysak7-seip-lua.s3.eu-central-1.amazonaws.com/bundle/manifest.json"
 $FluentBitExe      = Join-Path $ToolsPath "fluent-bit\bin\fluent-bit.exe"
 $FetchScript       = Join-Path $PSScriptRoot "fetch_lua_filters.py"
@@ -161,11 +162,12 @@ if (-not $pyExe) {
     if ($AllowStartWithoutLatestFilters) { Write-Warning $pyMsg } else { Write-Error $pyMsg; exit 1 }
 }
 $pyOut = & $pyExe $FetchScript `
-    --bundle-url  $BundleUrl `
-    --pub-key-b64 $LuaPublicKeyB64 `
-    --noise-path  $LocalNoiseFilterPath `
-    --user-path   $LocalUserFilterPath `
-    --state-file  $StateFilePath 2>&1
+    --bundle-url   $BundleUrl `
+    --pub-key-b64  $LuaPublicKeyB64 `
+    --noise-path   $LocalNoiseFilterPath `
+    --user-path    $LocalUserFilterPath `
+    --static-path  $LocalStaticFilterPath `
+    --state-file   $StateFilePath 2>&1
 if ($LASTEXITCODE -eq 0) {
     Write-Host $pyOut -ForegroundColor Green
 } elseif ($LASTEXITCODE -eq 2) {

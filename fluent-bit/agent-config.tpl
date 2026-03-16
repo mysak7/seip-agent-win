@@ -61,8 +61,14 @@
 [FILTER]
     Name    lua
     Match   *
-    script  llm_filter.lua
+    script  noise_filter.lua
     call    drop_noise
+
+[FILTER]
+    Name    lua
+    Match   *
+    script  static_filter.lua
+    call    cb_static
 
 [FILTER]
     Name    lua

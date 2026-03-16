@@ -34,9 +34,10 @@ if (Test-Path $ConfigPath) {
     elseif ($cfg -match 'AgentPath:\s*([^"\s]+)') { $AgentPath = $matches[1] }
 }
 
-$LocalNoiseFilterPath = Join-Path $AgentPath "noise_filter.lua"
-$LocalUserFilterPath  = Join-Path $AgentPath "user_filter.lua"
-$StateFilePath        = Join-Path $AgentPath "noise_filter.state"
+$LocalNoiseFilterPath  = Join-Path $AgentPath "noise_filter.lua"
+$LocalUserFilterPath   = Join-Path $AgentPath "user_filter.lua"
+$LocalStaticFilterPath = Join-Path $AgentPath "static_filter.lua"
+$StateFilePath         = Join-Path $AgentPath "noise_filter.state"
 $LogDir            = Join-Path $AgentPath "logs"
 
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
@@ -82,11 +83,12 @@ while ($true) {
         }
         if (-not $pyExe) { throw "Python not found. Create a .venv with 'python -m venv .venv && .venv\Scripts\pip install cryptography' or install Python 3 on PATH." }
         $pyOut = & $pyExe $FetchScript `
-            --bundle-url  $BundleUrl `
-            --pub-key-b64 $LuaPublicKeyB64 `
-            --noise-path  $LocalNoiseFilterPath `
-            --user-path   $LocalUserFilterPath `
-            --state-file  $StateFilePath 2>&1
+            --bundle-url   $BundleUrl `
+            --pub-key-b64  $LuaPublicKeyB64 `
+            --noise-path   $LocalNoiseFilterPath `
+            --user-path    $LocalUserFilterPath `
+            --static-path  $LocalStaticFilterPath `
+            --state-file   $StateFilePath 2>&1
 
         if ($LASTEXITCODE -eq 0) {
             Write-Log $pyOut

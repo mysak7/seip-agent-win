@@ -9,11 +9,12 @@ import sys, json, base64, argparse, urllib.request
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--bundle-url",  required=True)
-    ap.add_argument("--pub-key-b64", required=True)
-    ap.add_argument("--noise-path",  required=True)
-    ap.add_argument("--user-path",   required=True)
-    ap.add_argument("--state-file",  default=None,
+    ap.add_argument("--bundle-url",   required=True)
+    ap.add_argument("--pub-key-b64",  required=True)
+    ap.add_argument("--noise-path",   required=True)
+    ap.add_argument("--user-path",    required=True)
+    ap.add_argument("--static-path",  required=True)
+    ap.add_argument("--state-file",   default=None,
                     help="Path to timestamp state file; skip write if already current.")
     args = ap.parse_args()
 
@@ -32,7 +33,7 @@ def main():
         print(f"ERROR: Failed to download bundle: {e}", file=sys.stderr)
         sys.exit(1)
 
-    for field in ("generated_at", "noise_filter", "user_filter", "signature"):
+    for field in ("generated_at", "noise_filter", "user_filter", "static_filter", "signature"):
         if not bundle.get(field):
             print(f"ERROR: Bundle missing or empty field: {field}", file=sys.stderr)
             sys.exit(1)
@@ -49,9 +50,10 @@ def main():
 
     # Build canonical payload exactly as the Python signer does
     payload = json.dumps(
-        {"generated_at": bundle["generated_at"],
-         "noise_filter": bundle["noise_filter"],
-         "user_filter":  bundle["user_filter"]},
+        {"generated_at":  bundle["generated_at"],
+         "noise_filter":  bundle["noise_filter"],
+         "user_filter":   bundle["user_filter"],
+         "static_filter": bundle["static_filter"]},
         separators=(",", ":"), ensure_ascii=False
     ).encode("utf-8")
 
@@ -66,10 +68,12 @@ def main():
         sys.exit(1)
 
     # Write files
-    with open(args.noise_path, "w", encoding="utf-8") as f:
+    with open(args.noise_path,   "w", encoding="utf-8") as f:
         f.write(bundle["noise_filter"])
-    with open(args.user_path,  "w", encoding="utf-8") as f:
+    with open(args.user_path,    "w", encoding="utf-8") as f:
         f.write(bundle["user_filter"])
+    with open(args.static_path,  "w", encoding="utf-8") as f:
+        f.write(bundle["static_filter"])
 
     # Update state file
     if args.state_file:
